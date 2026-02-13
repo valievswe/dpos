@@ -1,14 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react'
-
-type Product = {
-  id: number
-  sku: string
-  name: string
-  price: number
-  stock: number
-  barcode?: string
-  unit?: string
-}
+import React, { useMemo, useState } from 'react'
+import { Product, useProducts } from '../hooks/useProducts'
 
 type CartLine = {
   product: Product
@@ -16,7 +7,7 @@ type CartLine = {
 }
 
 export function SalesPage(): React.ReactElement {
-  const [products, setProducts] = useState<Product[]>([])
+  const { products, reload, error: loadError } = useProducts()
   const [cart, setCart] = useState<CartLine[]>([])
   const [query, setQuery] = useState('')
   const [payment, setPayment] = useState<'cash' | 'card' | 'debt'>('cash')
@@ -25,19 +16,6 @@ export function SalesPage(): React.ReactElement {
   const [customerPhone, setCustomerPhone] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-
-  const load = async () => {
-    try {
-      const rows = await window.api.getProducts()
-      setProducts(rows)
-    } catch {
-      setError("Ma'lumotlarni yuklab bo'lmadi")
-    }
-  }
-
-  useEffect(() => {
-    load()
-  }, [])
 
   const addByQuery = async () => {
     setError(null)
@@ -93,7 +71,7 @@ export function SalesPage(): React.ReactElement {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return products.slice(0, 10)
+    if (!q) return products.slice(0, 15)
     return products
       .filter(
         (p) =>
@@ -101,7 +79,7 @@ export function SalesPage(): React.ReactElement {
           p.sku.toLowerCase().includes(q) ||
           (p.barcode ?? '').toLowerCase().includes(q)
       )
-      .slice(0, 10)
+      .slice(0, 20)
   }, [products, query])
 
   const checkout = async () => {
@@ -126,128 +104,200 @@ export function SalesPage(): React.ReactElement {
             : undefined
       }
       const res = await window.api.createSale(payload)
-      setMessage(
-        `Sotuv #${res.saleId} yakunlandi. Jami ${(res.total_cents / 100).toLocaleString('uz-UZ')} so'm`
-      )
-      cancelSale()
+      const successMsg = `Sotuv #${res.saleId} yakunlandi. Jami ${(res.total_cents / 100).toLocaleString('uz-UZ')} so'm`
+      if (window.confirm('Chekni chop etamizmi?')) {
+        const printRes = await window.api.printReceiptBySale(res.saleId)
+        if (!printRes.success) {
+          setError(printRes.error ?? 'Chek chiqarilmadi')
+        }
+      }
+      cancelSale(true)
+      setMessage(successMsg)
     } catch (e: any) {
       setError(`Xato: ${e?.message ?? 'noma'}`)
     }
   }
 
-  const cancelSale = () => {
+  const cancelSale = (keepMessage = false) => {
     setCart([])
     setDiscount(0)
     setCustomerName('')
     setCustomerPhone('')
     setPayment('cash')
-    setMessage(null)
+    if (!keepMessage) setMessage(null)
     setError(null)
   }
 
   return (
     <div
       style={{
-        padding: '24px',
-        border: '1px solid #e5e7eb',
-        borderRadius: '12px',
-        background: '#fff'
+        display: 'grid',
+        gridTemplateColumns: '1.05fr 0.95fr',
+        gap: '20px',
+        height: '100%'
       }}
     >
-      <div style={{ display: 'grid', gridTemplateColumns: '0.9fr 1.1fr', gap: '24px' }}>
-        <div>
-          <h3 style={{ marginTop: 0, marginBottom: '12px' }}>Mahsulotlar</h3>
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-            <input
-              placeholder="SKU / barkod / nom"
-              value={query}
-              autoFocus
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  addByQuery()
-                }
-              }}
-              style={{ flex: 1, padding: '12px' }}
-            />
-            <button
-              type="button"
-              style={{
-                padding: '12px 18px',
-                background: '#111827',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '8px'
-              }}
-              onClick={addByQuery}
-            >
-              Savatga
-            </button>
-            <button
-              type="button"
-              style={{
-                padding: '12px 18px',
-                border: '1px solid #d1d5db',
-                background: '#fff',
-                borderRadius: '8px'
-              }}
-              onClick={load}
-            >
-              Yangilash
-            </button>
-          </div>
-          {filtered.length > 0 && (
-            <div
-              style={{
-                border: '1px solid #e5e7eb',
-                borderRadius: '10px',
-                maxHeight: '460px',
-                overflowY: 'auto'
-              }}
-            >
+      <div
+        style={{
+          background: 'var(--surface-2)',
+        borderRadius: '10px',
+          border: '1px solid var(--border)',
+          padding: '18px',
+          boxShadow: 'var(--shadow-sm)',
+          display: 'flex',
+          flexDirection: 'column',
+          minHeight: 0
+        }}
+      >
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '12px' }}>
+          <input
+            placeholder="SKU / barkod / nom"
+            value={query}
+            autoFocus
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                addByQuery()
+              }
+            }}
+            style={{
+              flex: 1,
+              padding: '12px',
+            borderRadius: '8px',
+              border: '1px solid var(--border)',
+              background: 'var(--surface-3)',
+              color: '#f9fafb'
+            }}
+          />
+          <button
+            type="button"
+            style={{
+              padding: '12px 18px',
+              background: 'linear-gradient(135deg, var(--accent), var(--accent-strong))',
+              color: '#0b1224',
+              border: 'none',
+              borderRadius: '8px',
+              boxShadow: 'var(--shadow-sm)',
+              fontWeight: 600
+            }}
+            onClick={addByQuery}
+          >
+            Savatga
+          </button>
+          <button
+            type="button"
+            style={{
+              padding: '12px 10px',
+              border: '1px solid var(--border)',
+              background: 'var(--surface-3)',
+              color: '#f9fafb',
+              borderRadius: '10px'
+            }}
+            onClick={reload}
+          >
+            Yangilash
+          </button>
+        </div>
+
+        <div
+          style={{
+            border: '1px solid var(--border)',
+            borderRadius: '8px',
+            overflow: 'hidden',
+            background: 'var(--surface-3)',
+            minHeight: 0,
+            flex: 1
+          }}
+        >
+          {filtered.length > 0 ? (
+            <div style={{ maxHeight: 'calc(100vh - 260px)', overflowY: 'auto' }}>
               {filtered.map((p) => (
                 <div
                   key={p.id}
                   style={{
-                    padding: '14px 16px',
-                    borderBottom: '1px solid #f3f4f6',
+                    padding: '10px 16px',
+                    borderBottom: '1px solid var(--border-soft)',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center'
                   }}
                 >
                   <div>
-                    <div style={{ fontWeight: 600 }}>{p.name}</div>
-                    <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>
+                    <div style={{ fontWeight: 700 }}>{p.name}</div>
+                    <div style={{ fontSize: '0.88rem', color: 'var(--muted)' }}>
                       {p.sku} - {p.unit ?? 'dona'} - Qoldiq: {p.stock}
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <span>{p.price.toLocaleString('uz-UZ')} so'm</span>
-                    <button type="button" onClick={() => addToCart(p)}>
+                    <span style={{ color: 'var(--accent)' }}>
+                      {p.price.toLocaleString('uz-UZ')} so'm
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => addToCart(p)}
+                      style={{
+                        width: 34,
+                        height: 34,
+                        borderRadius: '10px',
+                        border: '1px solid var(--border)',
+                        background: 'rgba(34, 211, 238, 0.1)',
+                        color: '#e0f2fe',
+                        cursor: 'pointer'
+                      }}
+                    >
                       +
                     </button>
                   </div>
                 </div>
               ))}
             </div>
+          ) : (
+            <div style={{ padding: '18px', color: 'var(--muted)' }}>Mos mahsulot topilmadi.</div>
           )}
         </div>
+      </div>
 
-        <div>
-          <h3 style={{ marginTop: 0, marginBottom: '12px' }}>Savat</h3>
-          <div
-            style={{
-              border: '1px solid #e5e7eb',
-              borderRadius: '10px',
-              padding: '12px',
-              maxHeight: '380px',
-              overflowY: 'auto'
-            }}
-          >
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '12px',
+          minHeight: 0
+        }}
+      >
+        <div
+          style={{
+            border: '1px solid var(--border)',
+            borderRadius: '10px',
+            padding: '10px',
+            background: 'var(--surface-2)',
+            boxShadow: 'var(--shadow-sm)',
+            minHeight: 0,
+            maxHeight: '50vh',
+            overflow: 'hidden'
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 style={{ margin: 0, color: '#f9fafb' }}>Savat</h3>
+            <button
+              type="button"
+              onClick={cancelSale}
+              style={{
+                border: '1px solid var(--border)',
+                background: 'rgba(255,255,255,0.04)',
+                color: 'var(--muted)',
+                borderRadius: '8px',
+                padding: '8px 10px',
+                cursor: 'pointer'
+              }}
+            >
+              Tozalash
+            </button>
+          </div>
+          <div style={{ marginTop: '8px', maxHeight: 'calc(50vh - 70px)', overflowY: 'auto' }}>
             {cart.length === 0 ? (
-              <div style={{ color: '#6b7280', textAlign: 'center', padding: '30px 0' }}>
+              <div style={{ color: 'var(--muted)', textAlign: 'center', padding: '28px 0' }}>
                 Savat bo'sh. Chap tomondan mahsulot qo'shing.
               </div>
             ) : (
@@ -255,16 +305,17 @@ export function SalesPage(): React.ReactElement {
                 <div
                   key={c.product.id}
                   style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
+                    display: 'grid',
+                    gridTemplateColumns: '1fr auto',
                     alignItems: 'center',
                     padding: '10px 0',
-                    borderBottom: '1px solid #f3f4f6'
+                    borderBottom: '1px solid var(--border-soft)',
+                    gap: '12px'
                   }}
                 >
                   <div>
-                    <div style={{ fontWeight: 600 }}>{c.product.name}</div>
-                    <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>
+                    <div style={{ fontWeight: 700 }}>{c.product.name}</div>
+                    <div style={{ fontSize: '0.86rem', color: 'var(--muted)' }}>
                       {c.product.price.toLocaleString('uz-UZ')} so'm
                     </div>
                   </div>
@@ -274,7 +325,14 @@ export function SalesPage(): React.ReactElement {
                       min={1}
                       value={c.qty}
                       onChange={(e) => updateQty(c.product.id, Number(e.target.value))}
-                      style={{ width: '70px', padding: '6px' }}
+                      style={{
+                        width: '70px',
+                        padding: '8px',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border)',
+                        background: 'var(--surface-3)',
+                        color: '#f9fafb'
+                      }}
                     />
                     <strong>{(c.product.price * c.qty).toLocaleString('uz-UZ')} so'm</strong>
                   </div>
@@ -282,95 +340,140 @@ export function SalesPage(): React.ReactElement {
               ))
             )}
           </div>
+        </div>
 
-          <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              Chegirma (so'm)
-              <input
-                type="number"
-                min={0}
-                value={discount}
-                onChange={(e) => setDiscount(Number(e.target.value))}
-                style={{ padding: '10px' }}
-              />
+        <div
+          style={{
+            border: '1px solid var(--border)',
+            borderRadius: '10px',
+            padding: '10px',
+            background: 'var(--surface-2)',
+            boxShadow: 'var(--shadow-sm)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px'
+          }}
+        >
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--muted)' }}>
+            Chegirma (so'm)
+            <input
+              type="number"
+              min={0}
+              value={discount}
+              onChange={(e) => setDiscount(Number(e.target.value))}
+              style={{
+                padding: '12px',
+                borderRadius: '10px',
+                border: '1px solid var(--border)',
+                background: 'var(--surface-3)',
+                color: '#f9fafb'
+              }}
+            />
+          </label>
+
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--muted)' }}>
+              To'lov turi
+              <select
+                value={payment}
+                onChange={(e) => setPayment(e.target.value as any)}
+                style={{
+                  padding: '12px',
+                  borderRadius: '10px',
+                  border: '1px solid var(--border)',
+                  background: 'var(--surface-3)',
+                  color: '#f9fafb'
+                }}
+              >
+                <option value="cash">Naqd</option>
+                <option value="card">Karta</option>
+                <option value="debt">Qarz</option>
+              </select>
             </label>
-
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                To'lov turi
-                <select value={payment} onChange={(e) => setPayment(e.target.value as any)} style={{ padding: '10px' }}>
-                  <option value="cash">Naqd</option>
-                  <option value="card">Karta</option>
-                  <option value="debt">Qarz</option>
-                </select>
-              </label>
-              {payment === 'debt' && (
-                <input
-                  style={{ flex: 1, padding: '10px' }}
-                  placeholder="Mijoz ismi"
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                />
-              )}
-            </div>
             {payment === 'debt' && (
               <input
-                style={{ padding: '10px' }}
-                placeholder="Telefon"
-                value={customerPhone}
-                onChange={(e) => setCustomerPhone(e.target.value)}
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  borderRadius: '10px',
+                  border: '1px solid var(--border)',
+                  background: 'var(--surface-3)',
+                  color: '#f9fafb'
+                }}
+                placeholder="Mijoz ismi"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
               />
             )}
-
-            <div
+          </div>
+          {payment === 'debt' && (
+            <input
               style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                padding: '16px',
-                background: '#f3f4f6',
+                padding: '12px',
                 borderRadius: '10px',
-                fontWeight: 600
+                border: '1px solid var(--border)',
+                background: 'var(--surface-3)',
+                color: '#f9fafb'
+              }}
+              placeholder="Telefon"
+              value={customerPhone}
+              onChange={(e) => setCustomerPhone(e.target.value)}
+            />
+          )}
+
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              padding: '10px',
+              background: 'var(--surface-3)',
+            borderRadius: '8px',
+              fontWeight: 700,
+              border: '1px solid var(--border)'
+            }}
+          >
+            <span>Jami</span>
+            <span>{(total - discount).toLocaleString('uz-UZ')} so'm</span>
+          </div>
+
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <button
+              type="button"
+              onClick={cancelSale}
+              style={{
+                flex: 1,
+                padding: '12px',
+                border: '1px solid var(--border)',
+                background: 'rgba(255,255,255,0.04)',
+                color: '#f9fafb',
+            borderRadius: '8px',
+                cursor: 'pointer'
               }}
             >
-              <span>Jami</span>
-              <span>{(total - discount).toLocaleString('uz-UZ')} so'm</span>
-            </div>
-
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <button
-                type="button"
-                onClick={cancelSale}
-                style={{
-                  flex: 1,
-                  padding: '12px',
-                  border: '1px solid #d1d5db',
-                  background: '#fff',
-                  borderRadius: '8px'
-                }}
-              >
-                Bekor qilish
-              </button>
-              <button
-                type="button"
-                onClick={checkout}
-                style={{
-                  flex: 1,
-                  padding: '12px',
-                  background: '#111827',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: '8px'
-                }}
-              >
-                Sotish
-              </button>
-            </div>
+              Bekor qilish
+            </button>
+            <button
+              type="button"
+              onClick={checkout}
+              style={{
+                flex: 1,
+                padding: '12px',
+                background: 'linear-gradient(135deg, var(--accent), var(--accent-strong))',
+                color: '#0b1224',
+                border: 'none',
+                borderRadius: '10px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                boxShadow: 'var(--shadow-sm)'
+              }}
+            >
+              Sotish
+            </button>
           </div>
+          {message && <div style={{ color: 'var(--success)' }}>{message}</div>}
+          {(error || loadError) && <div style={{ color: 'var(--danger)' }}>{error ?? loadError}</div>}
         </div>
       </div>
-
-      {message && <div style={{ color: '#0f766e', marginTop: '16px' }}>{message}</div>}
-      {error && <div style={{ color: '#b91c1c', marginTop: '8px' }}>{error}</div>}
     </div>
   )
 }

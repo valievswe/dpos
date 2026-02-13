@@ -16,10 +16,10 @@ declare global {
     api: {
       printBarcode: (sku: string, name: string) => void
       printReceipt: (storeName: string, items: Product[], total: string) => void
-      printBarcodeByProduct: (productId: number, copies?: number) => Promise<boolean>
+      printBarcodeByProduct: (productId: number, copies?: number, printerName?: string) => Promise<boolean>
       printReceiptBySale: (saleId: number, printerName?: string) => Promise<{ success: boolean; error?: string }>
       getProducts: () => Promise<Product[]>
-      addProduct: (sku: string, name: string, price: number, unit?: string) => Promise<boolean>
+      addProduct: (sku: string, name: string, price: number, unit?: string, qty?: number) => Promise<boolean>
       findProduct: (code: string) => Promise<Product | null>
       setStock: (productId: number, qty: number) => Promise<boolean>
       createSale: (payload: {

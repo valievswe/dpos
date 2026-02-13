@@ -16,21 +16,25 @@ export function registerIpcHandlers(): void {
     return rows.map(mapProductRow)
   })
 
-  ipcMain.handle('add-product', (_event, sku: string, name: string, price: number, unit = 'dona') => {
-    try {
-      const normalizedUnit = typeof unit === 'string' ? unit.trim().toLowerCase() : 'dona'
-      const safeUnit = allowedUnits.has(normalizedUnit) ? normalizedUnit : 'dona'
-      const stmt = db.prepare(`
+  ipcMain.handle(
+    'add-product',
+    (_event, sku: string, name: string, price: number, unit = 'dona', qty: number = 0) => {
+      try {
+        const normalizedUnit = typeof unit === 'string' ? unit.trim().toLowerCase() : 'dona'
+        const safeUnit = allowedUnits.has(normalizedUnit) ? normalizedUnit : 'dona'
+        const initialQty = Number.isFinite(qty) && qty >= 0 ? Math.round(qty) : 0
+        const stmt = db.prepare(`
         INSERT INTO products (sku, name, price_cents, qty, unit)
-        VALUES (?, ?, ?, 0, ?)
+        VALUES (?, ?, ?, ?, ?)
       `)
-      const info = stmt.run(sku.trim(), name.trim(), Math.round(price * 100), safeUnit)
-      return info.changes > 0
-    } catch (err) {
-      console.error('DB Insert Error:', err)
-      return false
+        const info = stmt.run(sku.trim(), name.trim(), Math.round(price * 100), initialQty, safeUnit)
+        return info.changes > 0
+      } catch (err) {
+        console.error('DB Insert Error:', err)
+        return false
+      }
     }
-  })
+  )
 
   ipcMain.handle('find-product', (_event, code: string) => {
     const stmt = db.prepare(
@@ -236,8 +240,8 @@ export function registerIpcHandlers(): void {
     PrinterService.printReceipt(storeName, items, total)
   })
 
-  ipcMain.handle('print-barcode-product', async (_event, productId: number, copies = 1) => {
-    await PrinterService.printLabelByProduct(Number(productId), Number(copies) || 1)
+  ipcMain.handle('print-barcode-product', async (_event, productId: number, copies = 1, printerName?: string) => {
+    await PrinterService.printLabelByProduct(Number(productId), Number(copies) || 1, printerName || 'label')
     return true
   })
 

@@ -1,4 +1,4 @@
-# Do'kondor - POS System Codebase Documentation
+Ôªø# Do'kondor - POS System Codebase Documentation
 
 > **AI-Friendly Reference**  
 > Last Updated: 2026-02-13  
@@ -31,6 +31,7 @@
 - Sales ledger with receipt reprints, payment history, and summary list.
 - Print job journaling for both barcode and receipt printers to improve observability.
 - Auto-migration logic for older databases to the new schema.
+- Product creation supports unit selection and initial stock entry; barcode printing allows per-job printer choice.
 
 ---
 
@@ -67,13 +68,13 @@ graph TD
 ```
 src/
 +- main/
-¶  +- index.ts              # Electron bootstrap + lifecycle hooks
-¶  +- db/index.ts           # SQLite setup, migrations, helpers
-¶  +- ipc/index.ts          # All IPC handlers and business logic
-¶  L- services/printers.ts  # Wrapper over barcode/receipt executables
+¬¶  +- index.ts              # Electron bootstrap + lifecycle hooks
+¬¶  +- db/index.ts           # SQLite setup, migrations, helpers
+¬¶  +- ipc/index.ts          # All IPC handlers and business logic
+¬¶  L- services/printers.ts  # Wrapper over barcode/receipt executables
 +- preload/
-¶  +- index.ts              # contextBridge exposure of API surface
-¶  L- index.d.ts            # Global window typings for renderer
+¬¶  +- index.ts              # contextBridge exposure of API surface
+¬¶  L- index.d.ts            # Global window typings for renderer
 L- renderer/
    +- index.html
    L- src/
@@ -117,8 +118,8 @@ Handlers are registered once on app start. Highlights:
 - **Printing**: `trigger-print`/`trigger-receipt` support legacy fire-and-forget flows, while `print-barcode-product` and `print-receipt-sale` ensure a `print_jobs` ledger row per attempt and return success/failure to the renderer.
 
 ### Printer Service (`src/main/services/printers.ts`)
-- Resolves executable path depending on `app.isPackaged`.
-- `printLabelByProduct` lazily generates an EAN-8 barcode when none exists (using `generateEAN8FromId` + collision retries) and logs the attempt to `print_jobs` before running `testbarcode.exe` `copies` times.
+- Resolves executable path depending on `app.isPackaged`; in dev it falls back to `resources/bin` under repo root and surfaces missing-binary errors early.
+- `printLabelByProduct` lazily generates an EAN-8 barcode when none exists (using `generateEAN8FromId` + collision retries), accepts `printerName`, logs to `print_jobs`, and runs `testbarcode.exe` `copies` times.
 - `printReceiptBySale` rehydrates sale totals + items, formats the legacy `name|price` string, inserts a queued job, and executes `receipt.exe`.
 - Both methods update `print_jobs.status` to `done` or `failed` with `error` text for observability.
 
@@ -132,10 +133,10 @@ Handlers are registered once on app start. Highlights:
 ## Feature Workflows
 
 ### Inventory Lifecycle
-1. Clerk enters SKU/name/price in `ProductManager`.
-2. Renderer calls `window.api.addProduct` > `ipcMain.handle('add-product')` inserts row (price stored in cents) with default qty=0.
+1. Clerk opens the add-product modal and enters SKU/name/price/unit/initial qty in `ProductManager`.
+2. Renderer calls `window.api.addProduct` > `ipcMain.handle('add-product')` inserts row (price stored in cents) with provided unit and qty (default 0).
 3. Stock adjustments use `set-stock`, logging every change into `stock_movements` with before/after qty.
-4. Barcode labels are requested with `printBarcodeByProduct`, which ensures the product has a barcode and queues the print job.
+4. Barcode labels are requested with `printBarcodeByProduct` (optionally pass `printerName`), which ensures the product has a barcode and queues the print job.
 
 ### Sales & Debt Workflow
 1. `SalesPage` builds a cart from manual search, quick list, or barcode scanner input via `find-product` fallback.
@@ -146,11 +147,12 @@ Handlers are registered once on app start. Highlights:
 ### Sales History & Reprints
 - `SalesHistory` fetches the 50 most recent sales for quick review.
 - Selecting a sale triggers `get-sale-items` so the UI can display line-level totals.
-- Clicking ìChek chiqarishî invokes `printReceiptBySale`, which reuses persisted sale data instead of recomputing totals in the renderer.
+- Clicking ‚ÄúChek chiqarish‚Äù invokes `printReceiptBySale`, which reuses persisted sale data instead of recomputing totals in the renderer.
 
 ### Printing Strategy
 - Legacy `printBarcode` and `printReceipt` functions still exist for compatibility but do not write to `print_jobs`.
 - Newer receipt/barcode printing endpoints store structured payloads first, then execute the binary so offline auditing and retries are possible.
+- Barcode printing accepts a per-job printer name and fails fast if the binary is missing in dev/prod paths.
 
 ---
 
@@ -181,7 +183,7 @@ Handlers are registered once on app start. Highlights:
 | Renderer Call | IPC Channel | Location | Notes |
 |---------------|-------------|----------|-------|
 | `window.api.getProducts()` | `get-products` | `src/main/ipc/index.ts` | Returns active products sorted by name, using `mapProductRow`. |
-| `window.api.addProduct(sku, name, price)` | `add-product` | same | Price converted to cents, qty defaults to 0. |
+| `window.api.addProduct(sku, name, price, unit?, qty?)` | `add-product` | same | Price converted to cents; unit defaults to `dona`; qty defaults to 0. |
 | `window.api.findProduct(code)` | `find-product` | same | Looks up by barcode or SKU. |
 | `window.api.setStock(productId, qty)` | `set-stock` | same | Wraps movement logging transaction. |
 | `window.api.createSale(payload)` | `create-sale` | same | Transactional checkout, returns `{ saleId, total_cents }`. |
@@ -190,7 +192,7 @@ Handlers are registered once on app start. Highlights:
 | `window.api.payDebt(customerId, amountCents)` | `pay-debt` | same | Logs payment and updates open debts. |
 | `window.api.printBarcode(...)` | `trigger-print` | same | Legacy fire-and-forget. |
 | `window.api.printReceipt(...)` | `trigger-receipt` | same | Legacy fire-and-forget. |
-| `window.api.printBarcodeByProduct(productId, copies?)` | `print-barcode-product` | same | Inserts `print_jobs` row then runs binary. |
+| `window.api.printBarcodeByProduct(productId, copies?, printerName?)` | `print-barcode-product` | same | Inserts `print_jobs` row, resolves binary path, allows printer override, then runs binary. |
 | `window.api.printReceiptBySale(saleId, printerName?)` | `print-receipt-sale` | same | Returns `{ success, error? }`. |
 
 Every invoke-based handler propagates thrown errors to the renderer (caught as rejected Promise). Caller components display friendly messages around these failures.
@@ -204,7 +206,7 @@ Every invoke-based handler propagates thrown errors to the renderer (caught as r
 | `App` | `src/renderer/src/App.tsx` | High-level layout. Renders `Header`, `SalesPage`, `ProductManager`, `SalesHistory`. |
 | `Header` | `components/Header.tsx` | Simple nav/title placeholder. |
 | `SalesPage` | `components/SalesPage.tsx` | Cart UX, barcode scanning, search suggestions, checkout with discount, payment mode (cash/card/debt), and debt-only customer capture. Uses `window.api.findProduct`, `createSale`, etc. |
-| `ProductManager` | `components/ProductManager.tsx` | CRUD-lite interface to add products, inspect stock, trigger barcode printing, and push qty changes. Maintains inline error/loading states. |
+| `ProductManager` | `components/ProductManager.tsx` | CRUD-lite interface with modal product creation (unit + initial qty), stock adjustments, and barcode printing with printer selection. Maintains inline error/loading states. |
 | `SalesHistory` | `components/SalesHistory.tsx` | Lists last 50 sales, fetches detailed items on selection, reprints receipts via `printReceiptBySale`. |
 
 Renderer relies solely on inline styles today, but components are small and can be restyled without touching business logic.
@@ -253,3 +255,4 @@ Failure handling: when binaries fail, the corresponding `print_jobs` row records
 - To inspect DB quickly during dev: `sqlite3 %APPDATA%/Do'kondor/pos_system.db` and run SQL queries (`.schema`, `SELECT * FROM print_jobs ORDER BY id DESC LIMIT 5;`).
 
 This document now reflects the expanded multi-table schema, transactional sales logic, and print job journaling introduced in version 2.0.0.
+

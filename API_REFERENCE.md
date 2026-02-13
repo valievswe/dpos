@@ -48,7 +48,7 @@ interface SaleItemRow {
 | Method | IPC Channel | Returns | Notes |
 |--------|-------------|---------|-------|
 | `getProducts()` | `get-products` | `Promise<Product[]>` | Active products sorted by name. |
-| `addProduct(sku, name, price)` | `add-product` | `Promise<boolean>` | Price is decimal so'm; stored as cents. |
+| `addProduct(sku, name, price, unit?, qty?)` | `add-product` | `Promise<boolean>` | Price decimal so'm; unit defaults to `dona`; qty defaults to 0. |
 | `findProduct(code)` | `find-product` | `Promise<Product | null>` | Looks at `barcode` then `sku`. |
 | `setStock(productId, qty)` | `set-stock` | `Promise<boolean>` | Logs adjustment in `stock_movements`. |
 | `createSale(payload)` | `create-sale` | `Promise<{ saleId: number; total_cents: number }>` | Full transactional checkout. |
@@ -73,14 +73,16 @@ interface SaleItemRow {
   setProducts(products)
   ```
 
-### `window.api.addProduct(sku, name, price)`
+### `window.api.addProduct(sku, name, price, unit?, qty?)`
 - **IPC**: `ipcMain.handle('add-product')`
 - **Parameters**:
   - `sku`: Required unique identifier.
   - `name`: Product label.
   - `price`: Decimal so'm (renderer converts to cents internally).
+  - `unit` (optional): `'dona' | 'qadoq' | 'litr' | 'metr'`; defaults to `'dona'`.
+  - `qty` (optional): Initial stock integer; defaults to `0`.
 - **Returns**: `true` on insert, `false` on any DB error (duplicate SKU, constraint failure, etc.).
-- **Notes**: Quantity defaults to 0, unit defaults to `'dona'`.
+- **Notes**: Initial quantity is written to `products.qty` and will be reflected in `stock_movements` only on later adjustments/sales.
 
 ### `window.api.findProduct(code)`
 - **IPC**: `ipcMain.handle('find-product')`
@@ -92,14 +94,15 @@ interface SaleItemRow {
 - **Behavior**: Runs inside a database transaction. Updates the product quantity and records an `adjustment` row in `stock_movements` capturing delta, previous qty, and pricing context.
 - **Returns**: Resolves `true` when transaction succeeds; throws on validation errors (e.g., missing product).
 
-### `window.api.printBarcodeByProduct(productId, copies = 1)`
+### `window.api.printBarcodeByProduct(productId, copies = 1, printerName?)`
 - **IPC**: `ipcMain.handle('print-barcode-product')`
 - **Description**: Preferred workflow for barcode labels.
   1. Ensures the product has a unique EAN-8 barcode (auto-generates if missing).
-  2. Writes a queued row to `print_jobs` with payload metadata.
-  3. Executes `testbarcode.exe` `copies` times.
-  4. Updates job status to `done` or `failed`.
-- **Returns**: Resolves `true` after printer loop completes; rejects with an error message if the binary fails. Renderer should surface the rejection (ProductManager catches and shows message).
+  2. Writes a queued row to `print_jobs` with payload metadata (includes printer name).
+  3. Resolves the correct printer binary path in dev/prod; throws early if missing.
+  4. Executes `testbarcode.exe` `copies` times.
+  5. Updates job status to `done` or `failed`.
+- **Returns**: Resolves `true` after printer loop completes; rejects with an error message if the binary fails. Renderer should surface the rejection.
 
 ### `window.api.printBarcode(sku, name)` *(legacy)*
 - **IPC**: `ipcMain.on('trigger-print')`

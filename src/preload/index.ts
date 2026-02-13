@@ -22,8 +22,8 @@ const api = {
     ipcRenderer.send('trigger-receipt', storeName, items, total)
   },
 
-  printBarcodeByProduct: (productId: number, copies = 1): Promise<boolean> => {
-    return ipcRenderer.invoke('print-barcode-product', productId, copies)
+  printBarcodeByProduct: (productId: number, copies = 1, printerName?: string): Promise<boolean> => {
+    return ipcRenderer.invoke('print-barcode-product', productId, copies, printerName)
   },
 
   printReceiptBySale: (saleId: number, printerName?: string): Promise<{ success: boolean; error?: string }> => {
@@ -34,8 +34,8 @@ const api = {
     return ipcRenderer.invoke('get-products')
   },
 
-  addProduct: (sku: string, name: string, price: number, unit = 'dona'): Promise<boolean> => {
-    return ipcRenderer.invoke('add-product', sku, name, price, unit)
+  addProduct: (sku: string, name: string, price: number, unit = 'dona', qty = 0): Promise<boolean> => {
+    return ipcRenderer.invoke('add-product', sku, name, price, unit, qty)
   },
 
   findProduct: (code: string) => {

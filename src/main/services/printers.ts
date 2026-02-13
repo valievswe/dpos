@@ -1,13 +1,18 @@
 import { app } from 'electron'
 import path from 'path'
 import { execFile } from 'child_process'
+import fs from 'fs'
 import { getDB } from '../db'
 
 // Helper to find the correct path in Dev vs Prod
 const getBinaryPath = (binaryName: string): string => {
-  return app.isPackaged
-    ? path.join(process.resourcesPath, 'bin', binaryName)
-    : path.join(__dirname, '../../resources/bin', binaryName)
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'bin', binaryName)
+  }
+  // Dev: try dist-relative then repo root resources/bin
+  const candidate = path.join(__dirname, '../../resources/bin', binaryName)
+  if (fs.existsSync(candidate)) return candidate
+  return path.join(process.cwd(), 'resources', 'bin', binaryName)
 }
 
 export const PrinterService = {
@@ -33,7 +38,7 @@ export const PrinterService = {
   },
 
   // Barkod: productId dan oladi, print_jobs jurnalga yozadi
-  async printLabelByProduct(productId: number, copies = 1) {
+  async printLabelByProduct(productId: number, copies = 1, printerName = 'label') {
     const db = getDB()
     const product = db.prepare('SELECT id, name, barcode FROM products WHERE id = ?').get(productId) as any
     if (!product) throw new Error('Mahsulot topilmadi')
@@ -43,7 +48,7 @@ export const PrinterService = {
       barcode = ensureBarcode(db, product.id)
     }
 
-    const payload = { printer: 'label', barcode, name: product.name, copies }
+    const payload = { printer: printerName, barcode, name: product.name, copies }
     const jobId = db
       .prepare(
         `INSERT INTO print_jobs (kind, product_id, copies, status, payload)
@@ -52,6 +57,9 @@ export const PrinterService = {
       .run(productId, copies, JSON.stringify(payload)).lastInsertRowid
 
     const exePath = getBinaryPath('testbarcode.exe')
+    if (!fs.existsSync(exePath)) {
+      throw new Error(`Yorliq printer binari topilmadi: ${exePath}`)
+    }
     const args = [payload.printer, payload.barcode, payload.name]
 
     try {
