@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Product, useProducts } from '../hooks/useProducts'
 
 type CartLine = {
@@ -16,6 +16,11 @@ export function SalesPage(): React.ReactElement {
   const [customerPhone, setCustomerPhone] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
 
   const addByQuery = async () => {
     setError(null)
@@ -39,6 +44,7 @@ export function SalesPage(): React.ReactElement {
       }
       addToCart(product)
       setQuery('')
+      inputRef.current?.focus()
     } catch (e: any) {
       setError(`Xato: ${e?.message ?? 'noma'}`)
     }
@@ -126,6 +132,7 @@ export function SalesPage(): React.ReactElement {
     setPayment('cash')
     if (!keepMessage) setMessage(null)
     setError(null)
+    inputRef.current?.focus()
   }
 
   return (
@@ -140,19 +147,20 @@ export function SalesPage(): React.ReactElement {
       <div
         style={{
           background: 'var(--surface-2)',
-        borderRadius: '10px',
+          borderRadius: '6px',
           border: '1px solid var(--border)',
-          padding: '18px',
+          padding: '20px',
           boxShadow: 'var(--shadow-sm)',
           display: 'flex',
           flexDirection: 'column',
           minHeight: 0
         }}
       >
-        <div style={{ display: 'flex', gap: '10px', marginBottom: '12px' }}>
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
           <input
             placeholder="SKU / barkod / nom"
             value={query}
+            ref={inputRef}
             autoFocus
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -163,23 +171,24 @@ export function SalesPage(): React.ReactElement {
             }}
             style={{
               flex: 1,
-              padding: '12px',
-            borderRadius: '8px',
+              padding: '14px 14px',
+              borderRadius: '6px',
               border: '1px solid var(--border)',
               background: 'var(--surface-3)',
-              color: '#f9fafb'
+              color: '#f9fafb',
+              fontSize: '1rem'
             }}
           />
           <button
             type="button"
             style={{
-              padding: '12px 18px',
+              padding: '14px 22px',
               background: 'linear-gradient(135deg, var(--accent), var(--accent-strong))',
               color: '#0b1224',
               border: 'none',
-              borderRadius: '8px',
+              borderRadius: '6px',
               boxShadow: 'var(--shadow-sm)',
-              fontWeight: 600
+              fontWeight: 700
             }}
             onClick={addByQuery}
           >
@@ -188,22 +197,26 @@ export function SalesPage(): React.ReactElement {
           <button
             type="button"
             style={{
-              padding: '12px 10px',
+              padding: '14px 16px',
               border: '1px solid var(--border)',
               background: 'var(--surface-3)',
               color: '#f9fafb',
-              borderRadius: '10px'
+              borderRadius: '6px',
+              fontWeight: 600
             }}
             onClick={reload}
           >
             Yangilash
           </button>
         </div>
+        <div style={{ color: 'var(--muted)', marginBottom: 12, fontSize: '0.95rem' }}>
+          Skaner Enter yuboradi — bir necha marta skan qilinsa miqdor oshadi. Qidiruv orqali qo‘lda ham qo‘shing.
+        </div>
 
         <div
           style={{
             border: '1px solid var(--border)',
-            borderRadius: '8px',
+            borderRadius: '6px',
             overflow: 'hidden',
             background: 'var(--surface-3)',
             minHeight: 0,
@@ -216,7 +229,7 @@ export function SalesPage(): React.ReactElement {
                 <div
                   key={p.id}
                   style={{
-                    padding: '10px 16px',
+                    padding: '16px 18px',
                     borderBottom: '1px solid var(--border-soft)',
                     display: 'flex',
                     justifyContent: 'space-between',
@@ -224,26 +237,28 @@ export function SalesPage(): React.ReactElement {
                   }}
                 >
                   <div>
-                    <div style={{ fontWeight: 700 }}>{p.name}</div>
+                    <div style={{ fontWeight: 750, fontSize: '1.02rem' }}>{p.name}</div>
                     <div style={{ fontSize: '0.88rem', color: 'var(--muted)' }}>
                       {p.sku} - {p.unit ?? 'dona'} - Qoldiq: {p.stock}
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <span style={{ color: 'var(--accent)' }}>
+                    <span style={{ color: 'var(--accent)', fontWeight: 700 }}>
                       {p.price.toLocaleString('uz-UZ')} so'm
                     </span>
                     <button
                       type="button"
                       onClick={() => addToCart(p)}
                       style={{
-                        width: 34,
-                        height: 34,
-                        borderRadius: '10px',
+                        width: 40,
+                        height: 40,
+                        borderRadius: '6px',
                         border: '1px solid var(--border)',
-                        background: 'rgba(34, 211, 238, 0.1)',
+                        background: 'rgba(34, 211, 238, 0.12)',
                         color: '#e0f2fe',
-                        cursor: 'pointer'
+                        cursor: 'pointer',
+                        fontSize: '1.1rem',
+                        fontWeight: 800
                       }}
                     >
                       +
@@ -269,8 +284,8 @@ export function SalesPage(): React.ReactElement {
         <div
           style={{
             border: '1px solid var(--border)',
-            borderRadius: '10px',
-            padding: '10px',
+            borderRadius: '6px',
+            padding: '12px',
             background: 'var(--surface-2)',
             boxShadow: 'var(--shadow-sm)',
             minHeight: 0,
@@ -287,9 +302,10 @@ export function SalesPage(): React.ReactElement {
                 border: '1px solid var(--border)',
                 background: 'rgba(255,255,255,0.04)',
                 color: 'var(--muted)',
-                borderRadius: '8px',
+                borderRadius: '6px',
                 padding: '8px 10px',
-                cursor: 'pointer'
+                cursor: 'pointer',
+                fontWeight: 600
               }}
             >
               Tozalash
@@ -308,33 +324,82 @@ export function SalesPage(): React.ReactElement {
                     display: 'grid',
                     gridTemplateColumns: '1fr auto',
                     alignItems: 'center',
-                    padding: '10px 0',
+                    padding: '12px 0',
                     borderBottom: '1px solid var(--border-soft)',
                     gap: '12px'
                   }}
                 >
                   <div>
-                    <div style={{ fontWeight: 700 }}>{c.product.name}</div>
+                    <div style={{ fontWeight: 750 }}>{c.product.name}</div>
                     <div style={{ fontSize: '0.86rem', color: 'var(--muted)' }}>
                       {c.product.price.toLocaleString('uz-UZ')} so'm
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <input
-                      type="number"
-                      min={1}
-                      value={c.qty}
-                      onChange={(e) => updateQty(c.product.id, Number(e.target.value))}
-                      style={{
-                        width: '70px',
-                        padding: '8px',
-                        borderRadius: '8px',
-                        border: '1px solid var(--border)',
-                        background: 'var(--surface-3)',
-                        color: '#f9fafb'
-                      }}
-                    />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <button
+                        type="button"
+                        onClick={() => updateQty(c.product.id, c.qty - 1)}
+                        style={{
+                          width: 34,
+                          height: 34,
+                          borderRadius: '6px',
+                          border: '1px solid var(--border)',
+                          background: 'rgba(255,255,255,0.04)',
+                          color: '#f9fafb',
+                          cursor: 'pointer',
+                          fontWeight: 700
+                        }}
+                      >
+                        –
+                      </button>
+                      <div
+                        style={{
+                          minWidth: 44,
+                          textAlign: 'center',
+                          padding: '6px 8px',
+                          border: '1px solid var(--border)',
+                          borderRadius: '6px',
+                          background: 'var(--surface-3)',
+                          fontWeight: 700
+                        }}
+                      >
+                        {c.qty}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => updateQty(c.product.id, c.qty + 1)}
+                        style={{
+                          width: 34,
+                          height: 34,
+                          borderRadius: '6px',
+                          border: '1px solid var(--border)',
+                          background: 'rgba(34,211,238,0.12)',
+                          color: '#e0f2fe',
+                          cursor: 'pointer',
+                          fontWeight: 700
+                        }}
+                      >
+                        +
+                      </button>
+                    </div>
                     <strong>{(c.product.price * c.qty).toLocaleString('uz-UZ')} so'm</strong>
+                    <button
+                      type="button"
+                      onClick={() => updateQty(c.product.id, 0)}
+                      style={{
+                        width: 34,
+                        height: 34,
+                        borderRadius: '6px',
+                        border: '1px solid var(--border)',
+                        background: 'rgba(239,68,68,0.15)',
+                        color: '#fecdd3',
+                        cursor: 'pointer',
+                        fontWeight: 700
+                      }}
+                    >
+                      ×
+                    </button>
                   </div>
                 </div>
               ))
@@ -345,8 +410,8 @@ export function SalesPage(): React.ReactElement {
         <div
           style={{
             border: '1px solid var(--border)',
-            borderRadius: '10px',
-            padding: '10px',
+            borderRadius: '6px',
+            padding: '12px',
             background: 'var(--surface-2)',
             boxShadow: 'var(--shadow-sm)',
             display: 'flex',
@@ -363,7 +428,7 @@ export function SalesPage(): React.ReactElement {
               onChange={(e) => setDiscount(Number(e.target.value))}
               style={{
                 padding: '12px',
-                borderRadius: '10px',
+                borderRadius: '6px',
                 border: '1px solid var(--border)',
                 background: 'var(--surface-3)',
                 color: '#f9fafb'
@@ -379,7 +444,7 @@ export function SalesPage(): React.ReactElement {
                 onChange={(e) => setPayment(e.target.value as any)}
                 style={{
                   padding: '12px',
-                  borderRadius: '10px',
+                  borderRadius: '6px',
                   border: '1px solid var(--border)',
                   background: 'var(--surface-3)',
                   color: '#f9fafb'
@@ -395,7 +460,7 @@ export function SalesPage(): React.ReactElement {
                 style={{
                   flex: 1,
                   padding: '12px',
-                  borderRadius: '10px',
+                  borderRadius: '6px',
                   border: '1px solid var(--border)',
                   background: 'var(--surface-3)',
                   color: '#f9fafb'
@@ -410,7 +475,7 @@ export function SalesPage(): React.ReactElement {
             <input
               style={{
                 padding: '12px',
-                borderRadius: '10px',
+                borderRadius: '6px',
                 border: '1px solid var(--border)',
                 background: 'var(--surface-3)',
                 color: '#f9fafb'
@@ -425,10 +490,10 @@ export function SalesPage(): React.ReactElement {
             style={{
               display: 'flex',
               justifyContent: 'space-between',
-              padding: '10px',
+              padding: '12px',
               background: 'var(--surface-3)',
-            borderRadius: '8px',
-              fontWeight: 700,
+              borderRadius: '6px',
+              fontWeight: 750,
               border: '1px solid var(--border)'
             }}
           >
@@ -442,12 +507,13 @@ export function SalesPage(): React.ReactElement {
               onClick={cancelSale}
               style={{
                 flex: 1,
-                padding: '12px',
+                padding: '14px',
                 border: '1px solid var(--border)',
                 background: 'rgba(255,255,255,0.04)',
                 color: '#f9fafb',
-            borderRadius: '8px',
-                cursor: 'pointer'
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontWeight: 700
               }}
             >
               Bekor qilish
@@ -457,12 +523,12 @@ export function SalesPage(): React.ReactElement {
               onClick={checkout}
               style={{
                 flex: 1,
-                padding: '12px',
+                padding: '14px',
                 background: 'linear-gradient(135deg, var(--accent), var(--accent-strong))',
                 color: '#0b1224',
                 border: 'none',
-                borderRadius: '10px',
-                fontWeight: 700,
+                borderRadius: '6px',
+                fontWeight: 800,
                 cursor: 'pointer',
                 boxShadow: 'var(--shadow-sm)'
               }}
