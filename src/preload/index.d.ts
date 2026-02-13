@@ -6,6 +6,8 @@ export interface Product {
   name: string
   price: number
   stock: number
+  barcode?: string
+  unit?: string
 }
 
 declare global {
@@ -17,7 +19,7 @@ declare global {
       printBarcodeByProduct: (productId: number, copies?: number) => Promise<boolean>
       printReceiptBySale: (saleId: number, printerName?: string) => Promise<{ success: boolean; error?: string }>
       getProducts: () => Promise<Product[]>
-      addProduct: (sku: string, name: string, price: number) => Promise<boolean>
+      addProduct: (sku: string, name: string, price: number, unit?: string) => Promise<boolean>
       findProduct: (code: string) => Promise<Product | null>
       setStock: (productId: number, qty: number) => Promise<boolean>
       createSale: (payload: {

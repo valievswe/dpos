@@ -8,6 +8,8 @@ export interface Product {
   name: string
   price: number
   stock: number
+  barcode?: string
+  unit?: string
 }
 
 // 2. Define the API object with explicit types
@@ -32,8 +34,8 @@ const api = {
     return ipcRenderer.invoke('get-products')
   },
 
-  addProduct: (sku: string, name: string, price: number): Promise<boolean> => {
-    return ipcRenderer.invoke('add-product', sku, name, price)
+  addProduct: (sku: string, name: string, price: number, unit = 'dona'): Promise<boolean> => {
+    return ipcRenderer.invoke('add-product', sku, name, price, unit)
   },
 
   findProduct: (code: string) => {

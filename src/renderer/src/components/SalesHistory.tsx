@@ -14,10 +14,15 @@ export function SalesHistory(): React.ReactElement {
   const [items, setItems] = useState<
     { product_name: string; quantity: number; unit_price_cents: number; line_total_cents: number }[]
   >([])
+  const [error, setError] = useState<string | null>(null)
 
   const load = async () => {
-    const data = await window.api.getSales()
-    setRows(data)
+    try {
+      const data = await window.api.getSales()
+      setRows(data)
+    } catch {
+      setError("Sotuv tarixini yuklab bo'lmadi")
+    }
   }
 
   useEffect(() => {
@@ -26,20 +31,27 @@ export function SalesHistory(): React.ReactElement {
 
   const selectSale = async (id: number) => {
     setSelected(id)
-    const its = await window.api.getSaleItems(id)
-    setItems(its)
+    try {
+      const its = await window.api.getSaleItems(id)
+      setItems(its)
+    } catch {
+      setError("Sotuv tafsilotlari topilmadi")
+    }
   }
 
   const print = async (id: number) => {
     const res = await window.api.printReceiptBySale(id)
     if (!res.success) {
-      alert(res.error || 'Chop etilmadi')
+      setError(res.error ? `Chop etilmadi: ${res.error}` : 'Chop etilmadi')
+    } else {
+      setError(null)
     }
   }
 
   return (
-    <div style={{ padding: '12px', border: '1px solid #ddd', marginTop: '12px' }}>
-      <h3>So'nggi sotuvlar</h3>
+    <div style={{ padding: '16px', border: '1px solid #e5e7eb', borderRadius: '10px', background: '#fff' }}>
+      <h3 style={{ marginBottom: '8px' }}>So'nggi sotuvlar</h3>
+      {error && <div style={{ color: '#b91c1c', marginBottom: '8px' }}>{error}</div>}
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr style={{ borderBottom: '1px solid #ddd' }}>
@@ -64,7 +76,7 @@ export function SalesHistory(): React.ReactElement {
               <td>{r.payment_method}</td>
               <td>{r.customer_name ?? '-'}</td>
               <td>
-                <button onClick={(e) => { e.stopPropagation(); print(r.id) }}>
+                <button type="button" onClick={(e) => { e.stopPropagation(); print(r.id) }}>
                   Chek chiqarish
                 </button>
               </td>

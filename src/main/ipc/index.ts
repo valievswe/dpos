@@ -3,6 +3,8 @@ import { getDB } from '../db'
 import { PrinterService } from '../services/printers'
 import { mapProductRow } from '../db'
 
+const allowedUnits = new Set(['dona', 'qadoq', 'litr', 'metr'])
+
 export function registerIpcHandlers(): void {
   const db = getDB()
 
@@ -14,14 +16,16 @@ export function registerIpcHandlers(): void {
     return rows.map(mapProductRow)
   })
 
-  ipcMain.handle('add-product', (_event, sku, name, price) => {
+  ipcMain.handle('add-product', (_event, sku: string, name: string, price: number, unit = 'dona') => {
     try {
-        const stmt = db.prepare(`
-          INSERT INTO products (sku, name, price_cents, qty, unit)
-          VALUES (?, ?, ?, 0, 'dona')
-        `)
-        const info = stmt.run(sku, name, Math.round(price * 100))
-        return info.changes > 0
+      const normalizedUnit = typeof unit === 'string' ? unit.trim().toLowerCase() : 'dona'
+      const safeUnit = allowedUnits.has(normalizedUnit) ? normalizedUnit : 'dona'
+      const stmt = db.prepare(`
+        INSERT INTO products (sku, name, price_cents, qty, unit)
+        VALUES (?, ?, ?, 0, ?)
+      `)
+      const info = stmt.run(sku.trim(), name.trim(), Math.round(price * 100), safeUnit)
+      return info.changes > 0
     } catch (err) {
       console.error('DB Insert Error:', err)
       return false
@@ -66,7 +70,7 @@ export function registerIpcHandlers(): void {
     ) => {
       const t = db.transaction(() => {
         if (!payload.items || payload.items.length === 0) {
-          throw new Error('Bo‘sh savat')
+          throw new Error("Savat bo'sh")
         }
 
         // customer
@@ -206,7 +210,7 @@ export function registerIpcHandlers(): void {
     const t = db.transaction(() => {
       db.prepare(
         `INSERT INTO debt_transactions (customer_id, type, amount_cents, note)
-         VALUES (?, 'payment', ?, 'To‘lov')`
+         VALUES (?, 'payment', ?, 'To''lov')`
       ).run(customerId, amountCents)
       db.prepare('UPDATE customers SET debt_cents = MAX(debt_cents - ?, 0) WHERE id = ?').run(
         amountCents,
