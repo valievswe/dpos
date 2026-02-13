@@ -8,9 +8,9 @@ const Navbar: React.FC<NavbarProps> = ({ title }) => {
     <nav style={{ padding: '12px', borderBottom: '1px solid #ccc' }}>
       <span>{title}</span>
       <ul style={{ listStyle: 'none', display: 'inline-flex', gap: '12px', marginLeft: '20px' }}>
-        <li>Home</li>
-        <li>About</li>
-        <li>Contact</li>
+        <li>Bosh sahifa</li>
+        <li>Mahsulotlar</li>
+        <li>Sotuv</li>
       </ul>
     </nav>
   )
