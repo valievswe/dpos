@@ -34,6 +34,15 @@ const api = {
     return ipcRenderer.invoke('get-products')
   },
 
+  deleteProduct: (productId: number, force = false): Promise<{
+    success: boolean
+    requiresConfirmation?: boolean
+    saleCount?: number
+    movementCount?: number
+  }> => {
+    return ipcRenderer.invoke('delete-product', productId, force)
+  },
+
   addProduct: (sku: string, name: string, price: number, unit = 'dona', qty = 0): Promise<boolean> => {
     return ipcRenderer.invoke('add-product', sku, name, price, unit, qty)
   },

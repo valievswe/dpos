@@ -19,6 +19,15 @@ declare global {
       printBarcodeByProduct: (productId: number, copies?: number, printerName?: string) => Promise<boolean>
       printReceiptBySale: (saleId: number, printerName?: string) => Promise<{ success: boolean; error?: string }>
       getProducts: () => Promise<Product[]>
+      deleteProduct: (
+        productId: number,
+        force?: boolean
+      ) => Promise<{
+        success: boolean
+        requiresConfirmation?: boolean
+        saleCount?: number
+        movementCount?: number
+      }>
       addProduct: (sku: string, name: string, price: number, unit?: string, qty?: number) => Promise<boolean>
       findProduct: (code: string) => Promise<Product | null>
       setStock: (productId: number, qty: number) => Promise<boolean>

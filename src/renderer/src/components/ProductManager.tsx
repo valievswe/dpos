@@ -16,6 +16,30 @@ export function ProductManager(): React.ReactElement {
   const [printCopies, setPrintCopies] = useState('1')
   const [printPrinter, setPrintPrinter] = useState('label')
 
+  const deleteProduct = async (product: Product) => {
+    setError(null)
+    setInfo(null)
+    try {
+      const first = await window.api.deleteProduct(product.id, false)
+      if (first.requiresConfirmation) {
+        const ok = window.confirm(
+          `Bu mahsulot avval ishlatilgan (sotuv yozuvlari: ${first.saleCount ?? 0}, harakatlar: ${
+            first.movementCount ?? 0
+          }). Baribir o'chiraymi?`
+        )
+        if (!ok) return
+        const forced = await window.api.deleteProduct(product.id, true)
+        if (!forced.success) throw new Error("O'chirish amalga oshmadi")
+      } else if (!first.success) {
+        throw new Error("O'chirish amalga oshmadi")
+      }
+      setInfo("Mahsulot o'chirildi")
+      await reload()
+    } catch (err: any) {
+      setError(`Xato: ${err?.message ?? 'noma'}`)
+    }
+  }
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
@@ -283,7 +307,7 @@ export function ProductManager(): React.ReactElement {
               <th>Birlik</th>
               <th>Yangilash</th>
               <th>Barkod</th>
-              <th />
+              <th>Amallar</th>
             </tr>
           </thead>
           <tbody>
@@ -315,16 +339,57 @@ export function ProductManager(): React.ReactElement {
                         setStockEdit((s) => ({ ...s, [p.id]: e.target.value }))
                       }
                     />
-                    <button type="button" onClick={() => updateStock(p.id)}>
+                    <button
+                      type="button"
+                      onClick={() => updateStock(p.id)}
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border)',
+                        background: 'rgba(34,211,238,0.14)',
+                        color: '#e0f2fe',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
                       Saqlash
                     </button>
                   </div>
                 </td>
                 <td>{p.barcode ?? '-'}</td>
                 <td>
-                  <button type="button" onClick={() => printBarcode(p)}>
-                    Barkod chiqarish
-                  </button>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => printBarcode(p)}
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border)',
+                        background: 'linear-gradient(135deg, rgba(34,211,238,0.28), rgba(6,182,212,0.28))',
+                        color: '#e0f2fe',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Barkod chiqarish
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteProduct(p)}
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border)',
+                        background: 'rgba(239,68,68,0.14)',
+                        color: '#fecdd3',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      O'chirish
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

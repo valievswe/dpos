@@ -11,9 +11,9 @@ function App(): React.ReactElement {
   const [activeSection, setActiveSection] = useState<SectionId>('sales')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const sections = [
-    { id: 'sales', label: "Sotuv oynasi" },
+    { id: 'sales', label: 'Sotuv oynasi' },
     { id: 'inventory', label: 'Mahsulotlar' },
-    { id: 'history', label: "Sotuv tarixi" },
+    { id: 'history', label: 'Sotuv tarixi' },
     { id: 'debts', label: 'Qarzlar' }
   ]
 
@@ -39,11 +39,11 @@ function App(): React.ReactElement {
       case 'inventory':
         return "Mahsulot qo'shish, birliklarni sozlash, qoldiq va barkodlarni boshqarish"
       case 'history':
-        return "Cheklarni qayta chiqarish, filtrlash va tafsilotlarni ko‘rish"
+        return 'Cheklarni qayta chiqarish, filtrlash va tafsilotlarni ko‘rish'
       case 'debts':
         return "Mijoz qarzlari, to'lovlarni qayd qilish va balanslarni ko‘rish"
       default:
-        return "Skanner, qidiruv va mijoz qarzlari bilan tezkor savdo"
+        return 'Skanner, qidiruv va mijoz qarzlari bilan tezkor savdo'
     }
   }, [activeSection])
 
@@ -81,38 +81,9 @@ function App(): React.ReactElement {
             background: 'var(--surface-2)',
             border: '1px solid var(--border)',
             borderRadius: '10px',
-            padding: '18px 20px',
             boxShadow: 'var(--shadow-sm)'
           }}
-        >
-          <div>
-            <h1 style={{ margin: 0, fontSize: '1.5rem', color: '#f9fafb' }}>{pageTitle}</h1>
-            <p style={{ marginTop: '6px', color: 'var(--muted)' }}>{pageSubtitle}</p>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--muted)' }}>
-            <span
-              style={{
-                padding: '8px 12px',
-                border: '1px solid var(--border)',
-                borderRadius: '10px',
-                background: 'rgba(255,255,255,0.03)'
-              }}
-            >
-              Printer: label / receipt
-            </span>
-            <span
-              style={{
-                padding: '8px 12px',
-                border: '1px solid var(--border)',
-                borderRadius: '10px',
-                background: 'rgba(34,211,238,0.08)',
-                color: 'var(--accent)'
-              }}
-            >
-              Offline-first
-            </span>
-          </div>
-        </header>
+        ></header>
 
         <section style={{ flex: 1, minHeight: 0 }}>{renderView()}</section>
       </main>

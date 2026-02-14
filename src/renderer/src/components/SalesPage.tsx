@@ -16,10 +16,17 @@ export function SalesPage(): React.ReactElement {
   const [customerPhone, setCustomerPhone] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [isNarrow, setIsNarrow] = useState(() => window.innerWidth < 1400)
   const inputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     inputRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
+    const handleResize = () => setIsNarrow(window.innerWidth < 1400)
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
   }, [])
 
   // Barcode scanners usually send Enter; auto-add when newline appears
@@ -162,8 +169,8 @@ export function SalesPage(): React.ReactElement {
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: '0.75fr 1.25fr',
-        gap: '20px',
+        gridTemplateColumns: isNarrow ? '1fr' : '0.75fr 1.25fr',
+        gap: isNarrow ? '12px' : '20px',
         height: '100%',
         minHeight: 0,
         overflow: 'hidden'
@@ -179,11 +186,20 @@ export function SalesPage(): React.ReactElement {
           display: 'flex',
           flexDirection: 'column',
           minHeight: 0,
-          height: '75vh',
-          overflow: 'hidden'
+          height: isNarrow ? 'auto' : '75vh',
+          overflowX: 'visible',
+          overflowY: isNarrow ? 'visible' : 'hidden'
         }}
       >
-        <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: '10px',
+            marginBottom: '10px',
+            flexWrap: 'wrap',
+            rowGap: '8px'
+          }}
+        >
           <input
             placeholder="SKU / barkod / nom"
             value={query}
@@ -197,7 +213,8 @@ export function SalesPage(): React.ReactElement {
               }
             }}
             style={{
-              flex: 1,
+              flex: '1 1 260px',
+              minWidth: 0,
               padding: '14px 14px',
               borderRadius: '6px',
               border: '1px solid var(--border)',
@@ -209,6 +226,8 @@ export function SalesPage(): React.ReactElement {
           <button
             type="button"
             style={{
+              flex: '0 0 auto',
+              whiteSpace: 'nowrap',
               padding: '14px 22px',
               background: 'linear-gradient(135deg, var(--accent), var(--accent-strong))',
               color: '#0b1224',
@@ -224,6 +243,8 @@ export function SalesPage(): React.ReactElement {
           <button
             type="button"
             style={{
+              flex: '0 0 auto',
+              whiteSpace: 'nowrap',
               padding: '14px 16px',
               border: '1px solid var(--border)',
               background: 'var(--surface-3)',
@@ -247,7 +268,8 @@ export function SalesPage(): React.ReactElement {
             overflow: 'hidden',
             background: 'var(--surface-3)',
             minHeight: 0,
-            flex: 1
+            flex: isNarrow ? '0 0 auto' : 1,
+            maxHeight: isNarrow ? '60vh' : undefined
           }}
         >
           {filtered.length > 0 ? (
@@ -305,7 +327,8 @@ export function SalesPage(): React.ReactElement {
           display: 'flex',
           flexDirection: 'column',
           gap: '12px',
-          minHeight: 0
+          minHeight: 0,
+          height: isNarrow ? 'auto' : '75vh'
         }}
       >
         <div
@@ -316,8 +339,10 @@ export function SalesPage(): React.ReactElement {
             background: 'var(--surface-2)',
             boxShadow: 'var(--shadow-sm)',
             minHeight: 0,
-            height: '45vh',
-            overflow: 'hidden'
+            flex: 1,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column'
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -331,14 +356,21 @@ export function SalesPage(): React.ReactElement {
                 color: 'var(--muted)',
                 borderRadius: '6px',
                 padding: '8px 10px',
-                cursor: 'pointer',
-                fontWeight: 600
-              }}
-            >
-              Tozalash
-            </button>
+              cursor: 'pointer',
+              fontWeight: 600
+            }}
+          >
+            Tozalash
+          </button>
           </div>
-          <div style={{ marginTop: '8px', height: 'calc(45vh - 70px)', overflowY: 'auto' }}>
+          <div
+            style={{
+              marginTop: '8px',
+              flex: 1,
+              minHeight: 0,
+              overflowY: 'auto'
+            }}
+          >
             {cart.length === 0 ? (
               <div style={{ color: 'var(--muted)', textAlign: 'center', padding: '28px 0' }}>
                 Savat bo'sh. Chap tomondan mahsulot qo'shing.
@@ -465,7 +497,8 @@ export function SalesPage(): React.ReactElement {
             boxShadow: 'var(--shadow-sm)',
             display: 'flex',
             flexDirection: 'column',
-            gap: '10px'
+            gap: '10px',
+            flexShrink: 0
           }}
         >
           <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--muted)' }}>

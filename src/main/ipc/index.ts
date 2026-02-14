@@ -16,6 +16,29 @@ export function registerIpcHandlers(): void {
     return rows.map(mapProductRow)
   })
 
+  ipcMain.handle('delete-product', (_event, productId: number, force: boolean = false) => {
+    const product = db.prepare('SELECT id FROM products WHERE id = ?').get(productId) as any
+    if (!product) {
+      return { success: false, requiresConfirmation: false, saleCount: 0, movementCount: 0 }
+    }
+
+    const counts = db
+      .prepare(
+        `SELECT
+           (SELECT COUNT(*) FROM sale_items WHERE product_id = ?) AS saleCount,
+           (SELECT COUNT(*) FROM stock_movements WHERE product_id = ?) AS movementCount`
+      )
+      .get(productId, productId) as { saleCount: number; movementCount: number }
+
+    const requiresConfirmation = (counts?.saleCount ?? 0) > 0 || (counts?.movementCount ?? 0) > 0
+    if (requiresConfirmation && !force) {
+      return { success: false, requiresConfirmation: true, ...counts }
+    }
+
+    const res = db.prepare('UPDATE products SET active = 0 WHERE id = ?').run(productId)
+    return { success: res.changes > 0, requiresConfirmation: false, ...counts }
+  })
+
   ipcMain.handle(
     'add-product',
     (_event, sku: string, name: string, price: number, unit = 'dona', qty: number = 0) => {
