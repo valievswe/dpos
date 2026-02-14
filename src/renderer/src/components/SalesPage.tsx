@@ -11,7 +11,7 @@ export function SalesPage(): React.ReactElement {
   const [cart, setCart] = useState<CartLine[]>([])
   const [query, setQuery] = useState('')
   const [payment, setPayment] = useState<'cash' | 'card' | 'debt'>('cash')
-  const [discount, setDiscount] = useState(0)
+  const [discount, setDiscount] = useState('0')
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
   const [message, setMessage] = useState<string | null>(null)
@@ -21,6 +21,13 @@ export function SalesPage(): React.ReactElement {
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
+
+  // Barcode scanners usually send Enter; auto-add when newline appears
+  useEffect(() => {
+    if (query.includes('\n') || query.includes('\r')) {
+      addByQuery()
+    }
+  }, [query])
 
   const addByQuery = async () => {
     setError(null)
@@ -62,11 +69,23 @@ export function SalesPage(): React.ReactElement {
     })
   }
 
-  const updateQty = (id: number, qty: number) => {
+  const updateQty = (
+    id: number,
+    qty: number,
+    opts: { allowZero?: boolean; remove?: boolean } = {}
+  ) => {
+    const allowZero = opts.allowZero ?? false
+    const remove = opts.remove ?? false
     setCart((prev) =>
       prev
-        .map((c) => (c.product.id === id ? { ...c, qty: Math.max(1, qty) } : c))
-        .filter((c) => c.qty > 0)
+        .map((c) => {
+          if (c.product.id !== id) return c
+          const safeQty = Number.isFinite(qty) ? qty : 0
+          if (remove) return { ...c, qty: 0 }
+          const nextQty = allowZero ? Math.max(0, safeQty) : Math.max(1, safeQty)
+          return { ...c, qty: nextQty }
+        })
+        .filter((c) => (remove ? c.qty > 0 : true))
     )
   }
 
@@ -74,6 +93,10 @@ export function SalesPage(): React.ReactElement {
     () => cart.reduce((sum, c) => sum + c.product.price * c.qty, 0),
     [cart]
   )
+  const discountValue = useMemo(() => {
+    const num = parseFloat(discount)
+    return Number.isFinite(num) && num > 0 ? num : 0
+  }, [discount])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -103,7 +126,7 @@ export function SalesPage(): React.ReactElement {
       const payload = {
         items: cart.map((c) => ({ productId: c.product.id, qty: c.qty })),
         paymentMethod: payment,
-        discountCents: Math.round(discount * 100),
+        discountCents: Math.round(discountValue * 100),
         customer:
           payment === 'debt'
             ? { name: customerName.trim(), phone: customerPhone.trim() || undefined }
@@ -126,7 +149,7 @@ export function SalesPage(): React.ReactElement {
 
   const cancelSale = (keepMessage = false) => {
     setCart([])
-    setDiscount(0)
+    setDiscount('0')
     setCustomerName('')
     setCustomerPhone('')
     setPayment('cash')
@@ -139,9 +162,11 @@ export function SalesPage(): React.ReactElement {
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: '1.05fr 0.95fr',
+        gridTemplateColumns: '0.75fr 1.25fr',
         gap: '20px',
-        height: '100%'
+        height: '100%',
+        minHeight: 0,
+        overflow: 'hidden'
       }}
     >
       <div
@@ -153,7 +178,9 @@ export function SalesPage(): React.ReactElement {
           boxShadow: 'var(--shadow-sm)',
           display: 'flex',
           flexDirection: 'column',
-          minHeight: 0
+          minHeight: 0,
+          height: '75vh',
+          overflow: 'hidden'
         }}
       >
         <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
@@ -210,7 +237,7 @@ export function SalesPage(): React.ReactElement {
           </button>
         </div>
         <div style={{ color: 'var(--muted)', marginBottom: 12, fontSize: '0.95rem' }}>
-          Skaner Enter yuboradi — bir necha marta skan qilinsa miqdor oshadi. Qidiruv orqali qo‘lda ham qo‘shing.
+          Skaner Enter yuboradi — bir necha marta skan qilinsa miqdor oshadi. Qidiruv orqali qo'lda ham qo'shing.
         </div>
 
         <div
@@ -224,7 +251,7 @@ export function SalesPage(): React.ReactElement {
           }}
         >
           {filtered.length > 0 ? (
-            <div style={{ maxHeight: 'calc(100vh - 260px)', overflowY: 'auto' }}>
+            <div style={{ height: '100%', minHeight: 0, overflowY: 'auto' }}>
               {filtered.map((p) => (
                 <div
                   key={p.id}
@@ -237,7 +264,7 @@ export function SalesPage(): React.ReactElement {
                   }}
                 >
                   <div>
-                    <div style={{ fontWeight: 750, fontSize: '1.02rem' }}>{p.name}</div>
+                    <div style={{ fontWeight: 800, fontSize: '1.14rem' }}>{p.name}</div>
                     <div style={{ fontSize: '0.88rem', color: 'var(--muted)' }}>
                       {p.sku} - {p.unit ?? 'dona'} - Qoldiq: {p.stock}
                     </div>
@@ -250,14 +277,14 @@ export function SalesPage(): React.ReactElement {
                       type="button"
                       onClick={() => addToCart(p)}
                       style={{
-                        width: 40,
-                        height: 40,
-                        borderRadius: '6px',
+                        width: 52,
+                        height: 52,
+                        borderRadius: '10px',
                         border: '1px solid var(--border)',
                         background: 'rgba(34, 211, 238, 0.12)',
                         color: '#e0f2fe',
                         cursor: 'pointer',
-                        fontSize: '1.1rem',
+                        fontSize: '1.35rem',
                         fontWeight: 800
                       }}
                     >
@@ -289,12 +316,12 @@ export function SalesPage(): React.ReactElement {
             background: 'var(--surface-2)',
             boxShadow: 'var(--shadow-sm)',
             minHeight: 0,
-            maxHeight: '50vh',
+            height: '45vh',
             overflow: 'hidden'
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ margin: 0, color: '#f9fafb' }}>Savat</h3>
+            <h3 style={{ margin: 0, color: '#f9fafb', fontSize: '1.1rem' }}>Savat</h3>
             <button
               type="button"
               onClick={cancelSale}
@@ -311,7 +338,7 @@ export function SalesPage(): React.ReactElement {
               Tozalash
             </button>
           </div>
-          <div style={{ marginTop: '8px', maxHeight: 'calc(50vh - 70px)', overflowY: 'auto' }}>
+          <div style={{ marginTop: '8px', height: 'calc(45vh - 70px)', overflowY: 'auto' }}>
             {cart.length === 0 ? (
               <div style={{ color: 'var(--muted)', textAlign: 'center', padding: '28px 0' }}>
                 Savat bo'sh. Chap tomondan mahsulot qo'shing.
@@ -330,72 +357,94 @@ export function SalesPage(): React.ReactElement {
                   }}
                 >
                   <div>
-                    <div style={{ fontWeight: 750 }}>{c.product.name}</div>
-                    <div style={{ fontSize: '0.86rem', color: 'var(--muted)' }}>
+                    <div style={{ fontWeight: 800, fontSize: '1.5rem' }}>{c.product.name}</div>
+                    <div style={{ fontSize: '1rem', color: 'var(--muted)', fontWeight: 600 }}>
                       {c.product.price.toLocaleString('uz-UZ')} so'm
                     </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <button
                         type="button"
-                        onClick={() => updateQty(c.product.id, c.qty - 1)}
+                        onClick={() => updateQty(c.product.id, c.qty - 1, { allowZero: false })}
                         style={{
-                          width: 34,
-                          height: 34,
-                          borderRadius: '6px',
+                          width: 44,
+                          height: 44,
+                          borderRadius: '10px',
                           border: '1px solid var(--border)',
-                          background: 'rgba(255,255,255,0.04)',
+                          background: 'rgba(255,255,255,0.06)',
                           color: '#f9fafb',
                           cursor: 'pointer',
-                          fontWeight: 700
+                          fontWeight: 800,
+                          fontSize: '1.5rem'
                         }}
                       >
-                        –
+                        -
                       </button>
-                      <div
+                      <input
+                        type="number"
+                        min={0}
+                        value={c.qty === 0 ? '' : c.qty}
+                        onChange={(e) =>
+                          updateQty(
+                            c.product.id,
+                            e.target.value === '' ? 0 : Number(e.target.value),
+                            { allowZero: true }
+                          )
+                        }
+                        onBlur={(e) =>
+                          updateQty(
+                            c.product.id,
+                            e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)),
+                            { allowZero: true }
+                          )
+                        }
                         style={{
-                          minWidth: 44,
+                          width: 110,
                           textAlign: 'center',
-                          padding: '6px 8px',
+                          padding: '10px 12px',
                           border: '1px solid var(--border)',
-                          borderRadius: '6px',
+                          borderRadius: '9px',
                           background: 'var(--surface-3)',
-                          fontWeight: 700
+                          fontWeight: 800,
+                          fontSize: '1.5rem',
+                          color: '#f9fafb'
                         }}
-                      >
-                        {c.qty}
-                      </div>
+                      />
                       <button
                         type="button"
-                        onClick={() => updateQty(c.product.id, c.qty + 1)}
+                        onClick={() => updateQty(c.product.id, c.qty + 1, { allowZero: false })}
                         style={{
-                          width: 34,
-                          height: 34,
-                          borderRadius: '6px',
+                          width: 44,
+                          height: 44,
+                          borderRadius: '10px',
                           border: '1px solid var(--border)',
                           background: 'rgba(34,211,238,0.12)',
                           color: '#e0f2fe',
                           cursor: 'pointer',
-                          fontWeight: 700
+                          fontWeight: 800,
+                          fontSize: '1.5rem'
                         }}
                       >
                         +
                       </button>
                     </div>
-                    <strong>{(c.product.price * c.qty).toLocaleString('uz-UZ')} so'm</strong>
-                    <button
-                      type="button"
-                      onClick={() => updateQty(c.product.id, 0)}
-                      style={{
-                        width: 34,
-                        height: 34,
-                        borderRadius: '6px',
-                        border: '1px solid var(--border)',
+                    <strong style={{ fontSize: '1.5rem' }}>
+                      {(c.product.price * c.qty).toLocaleString('uz-UZ')} so'm
+                    </strong>
+                      <button
+                        type="button"
+                        onClick={() => updateQty(c.product.id, 0, { remove: true })}
+                        style={{
+                          width: 40,
+                          height: 40,
+                          borderRadius: '9px',
+                          border: '1px solid var(--border)',
                         background: 'rgba(239,68,68,0.15)',
                         color: '#fecdd3',
                         cursor: 'pointer',
-                        fontWeight: 700
+                        fontWeight: 800,
+                        fontSize: '1.5rem'
                       }}
                     >
                       ×
@@ -423,9 +472,8 @@ export function SalesPage(): React.ReactElement {
             Chegirma (so'm)
             <input
               type="number"
-              min={0}
               value={discount}
-              onChange={(e) => setDiscount(Number(e.target.value))}
+              onChange={(e) => setDiscount(e.target.value)}
               style={{
                 padding: '12px',
                 borderRadius: '6px',
@@ -498,7 +546,7 @@ export function SalesPage(): React.ReactElement {
             }}
           >
             <span>Jami</span>
-            <span>{(total - discount).toLocaleString('uz-UZ')} so'm</span>
+            <span>{Math.max(total - discountValue, 0).toLocaleString('uz-UZ')} so'm</span>
           </div>
 
           <div style={{ display: 'flex', gap: '12px' }}>
