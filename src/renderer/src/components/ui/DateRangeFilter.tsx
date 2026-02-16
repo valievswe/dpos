@@ -18,7 +18,7 @@ export function DateRangeFilter({ from, to, onChange }: Props): React.ReactEleme
           onChange={(e) => onChange({ from: e.target.value || undefined, to })}
           style={{
             padding: '10px',
-            borderRadius: 10,
+            borderRadius: 5,
             border: '1px solid var(--border)',
             background: 'var(--surface-3)',
             color: '#f9fafb'
@@ -33,7 +33,7 @@ export function DateRangeFilter({ from, to, onChange }: Props): React.ReactEleme
           onChange={(e) => onChange({ from, to: e.target.value || undefined })}
           style={{
             padding: '10px',
-            borderRadius: 10,
+            borderRadius: 5,
             border: '1px solid var(--border)',
             background: 'var(--surface-3)',
             color: '#f9fafb'

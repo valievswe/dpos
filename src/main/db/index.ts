@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS customers (
 CREATE TABLE IF NOT EXISTS sales (
   id INTEGER PRIMARY KEY,
   customer_id INTEGER REFERENCES customers(id),
-  sale_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+  sale_date DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%S+05:00', 'now', '+5 hours')),
   subtotal_cents INTEGER NOT NULL,
   discount_cents INTEGER NOT NULL DEFAULT 0,
   tax_cents INTEGER NOT NULL DEFAULT 0,

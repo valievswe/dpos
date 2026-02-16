@@ -32,7 +32,7 @@ export function Modal({ open, title, onClose, children, width = 520 }: Props): R
           maxWidth: '90vw',
           background: 'var(--surface-2)',
           border: '1px solid var(--border)',
-          borderRadius: 12,
+          borderRadius: 5,
           boxShadow: 'var(--shadow-lg)',
           padding: 18,
           color: '#f9fafb'

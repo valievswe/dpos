@@ -42,15 +42,11 @@ export function SalesPage(): React.ReactElement {
     if (!code) return
     try {
       const found = await window.api.findProduct(code)
+      const target = code.toLowerCase()
       const product =
         found ||
         products.find((p) => {
-          const target = code.toLowerCase()
-          return (
-            p.sku.toLowerCase() === target ||
-            (p.barcode ?? '').toLowerCase() === target ||
-            p.name.toLowerCase() === target
-          )
+          return (p.barcode ?? '').toLowerCase() === target
         })
       if (!product) {
         setError('Mahsulot topilmadi')
@@ -109,12 +105,7 @@ export function SalesPage(): React.ReactElement {
     const q = query.trim().toLowerCase()
     if (!q) return products.slice(0, 15)
     return products
-      .filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          p.sku.toLowerCase().includes(q) ||
-          (p.barcode ?? '').toLowerCase().includes(q)
-      )
+      .filter((p) => p.name.toLowerCase().includes(q) || (p.barcode ?? '').toLowerCase().includes(q))
       .slice(0, 20)
   }, [products, query])
 
@@ -179,7 +170,7 @@ export function SalesPage(): React.ReactElement {
       <div
         style={{
           background: 'var(--surface-2)',
-          borderRadius: '6px',
+          borderRadius: '5px',
           border: '1px solid var(--border)',
           padding: '20px',
           boxShadow: 'var(--shadow-sm)',
@@ -201,7 +192,7 @@ export function SalesPage(): React.ReactElement {
           }}
         >
           <input
-            placeholder="SKU / barkod / nom"
+            placeholder="Barkod / nom"
             value={query}
             ref={inputRef}
             autoFocus
@@ -216,7 +207,7 @@ export function SalesPage(): React.ReactElement {
               flex: '1 1 260px',
               minWidth: 0,
               padding: '14px 14px',
-              borderRadius: '6px',
+              borderRadius: '5px',
               border: '1px solid var(--border)',
               background: 'var(--surface-3)',
               color: '#f9fafb',
@@ -232,7 +223,7 @@ export function SalesPage(): React.ReactElement {
               background: 'linear-gradient(135deg, var(--accent), var(--accent-strong))',
               color: '#0b1224',
               border: 'none',
-              borderRadius: '6px',
+              borderRadius: '5px',
               boxShadow: 'var(--shadow-sm)',
               fontWeight: 700
             }}
@@ -249,7 +240,7 @@ export function SalesPage(): React.ReactElement {
               border: '1px solid var(--border)',
               background: 'var(--surface-3)',
               color: '#f9fafb',
-              borderRadius: '6px',
+              borderRadius: '5px',
               fontWeight: 600
             }}
             onClick={reload}
@@ -264,7 +255,7 @@ export function SalesPage(): React.ReactElement {
         <div
           style={{
             border: '1px solid var(--border)',
-            borderRadius: '6px',
+            borderRadius: '5px',
             overflow: 'hidden',
             background: 'var(--surface-3)',
             minHeight: 0,
@@ -288,7 +279,7 @@ export function SalesPage(): React.ReactElement {
                   <div>
                     <div style={{ fontWeight: 800, fontSize: '1.14rem' }}>{p.name}</div>
                     <div style={{ fontSize: '0.88rem', color: 'var(--muted)' }}>
-                      {p.sku} - {p.unit ?? 'dona'} - Qoldiq: {p.stock}
+                      {p.barcode ?? '-'} - {p.unit ?? 'dona'} - Qoldiq: {p.stock}
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -301,7 +292,7 @@ export function SalesPage(): React.ReactElement {
                       style={{
                         width: 52,
                         height: 52,
-                        borderRadius: '10px',
+                        borderRadius: '5px',
                         border: '1px solid var(--border)',
                         background: 'rgba(34, 211, 238, 0.12)',
                         color: '#e0f2fe',
@@ -334,7 +325,7 @@ export function SalesPage(): React.ReactElement {
         <div
           style={{
             border: '1px solid var(--border)',
-            borderRadius: '6px',
+            borderRadius: '5px',
             padding: '12px',
             background: 'var(--surface-2)',
             boxShadow: 'var(--shadow-sm)',
@@ -354,7 +345,7 @@ export function SalesPage(): React.ReactElement {
                 border: '1px solid var(--border)',
                 background: 'rgba(255,255,255,0.04)',
                 color: 'var(--muted)',
-                borderRadius: '6px',
+                borderRadius: '5px',
                 padding: '8px 10px',
               cursor: 'pointer',
               fontWeight: 600
@@ -402,7 +393,7 @@ export function SalesPage(): React.ReactElement {
                         style={{
                           width: 44,
                           height: 44,
-                          borderRadius: '10px',
+                          borderRadius: '5px',
                           border: '1px solid var(--border)',
                           background: 'rgba(255,255,255,0.06)',
                           color: '#f9fafb',
@@ -436,7 +427,7 @@ export function SalesPage(): React.ReactElement {
                           textAlign: 'center',
                           padding: '10px 12px',
                           border: '1px solid var(--border)',
-                          borderRadius: '9px',
+                          borderRadius: '5px',
                           background: 'var(--surface-3)',
                           fontWeight: 800,
                           fontSize: '1.5rem',
@@ -449,7 +440,7 @@ export function SalesPage(): React.ReactElement {
                         style={{
                           width: 44,
                           height: 44,
-                          borderRadius: '10px',
+                          borderRadius: '5px',
                           border: '1px solid var(--border)',
                           background: 'rgba(34,211,238,0.12)',
                           color: '#e0f2fe',
@@ -470,7 +461,7 @@ export function SalesPage(): React.ReactElement {
                         style={{
                           width: 40,
                           height: 40,
-                          borderRadius: '9px',
+                          borderRadius: '5px',
                           border: '1px solid var(--border)',
                         background: 'rgba(239,68,68,0.15)',
                         color: '#fecdd3',
@@ -491,7 +482,7 @@ export function SalesPage(): React.ReactElement {
         <div
           style={{
             border: '1px solid var(--border)',
-            borderRadius: '6px',
+            borderRadius: '5px',
             padding: '12px',
             background: 'var(--surface-2)',
             boxShadow: 'var(--shadow-sm)',
@@ -509,7 +500,7 @@ export function SalesPage(): React.ReactElement {
               onChange={(e) => setDiscount(e.target.value)}
               style={{
                 padding: '12px',
-                borderRadius: '6px',
+                borderRadius: '5px',
                 border: '1px solid var(--border)',
                 background: 'var(--surface-3)',
                 color: '#f9fafb'
@@ -525,7 +516,7 @@ export function SalesPage(): React.ReactElement {
                 onChange={(e) => setPayment(e.target.value as any)}
                 style={{
                   padding: '12px',
-                  borderRadius: '6px',
+                  borderRadius: '5px',
                   border: '1px solid var(--border)',
                   background: 'var(--surface-3)',
                   color: '#f9fafb'
@@ -541,7 +532,7 @@ export function SalesPage(): React.ReactElement {
                 style={{
                   flex: 1,
                   padding: '12px',
-                  borderRadius: '6px',
+                  borderRadius: '5px',
                   border: '1px solid var(--border)',
                   background: 'var(--surface-3)',
                   color: '#f9fafb'
@@ -556,7 +547,7 @@ export function SalesPage(): React.ReactElement {
             <input
               style={{
                 padding: '12px',
-                borderRadius: '6px',
+                borderRadius: '5px',
                 border: '1px solid var(--border)',
                 background: 'var(--surface-3)',
                 color: '#f9fafb'
@@ -573,7 +564,7 @@ export function SalesPage(): React.ReactElement {
               justifyContent: 'space-between',
               padding: '12px',
               background: 'var(--surface-3)',
-              borderRadius: '6px',
+              borderRadius: '5px',
               fontWeight: 750,
               border: '1px solid var(--border)'
             }}
@@ -592,7 +583,7 @@ export function SalesPage(): React.ReactElement {
                 border: '1px solid var(--border)',
                 background: 'rgba(255,255,255,0.04)',
                 color: '#f9fafb',
-                borderRadius: '6px',
+                borderRadius: '5px',
                 cursor: 'pointer',
                 fontWeight: 700
               }}
@@ -608,7 +599,7 @@ export function SalesPage(): React.ReactElement {
                 background: 'linear-gradient(135deg, var(--accent), var(--accent-strong))',
                 color: '#0b1224',
                 border: 'none',
-                borderRadius: '6px',
+                borderRadius: '5px',
                 fontWeight: 800,
                 cursor: 'pointer',
                 boxShadow: 'var(--shadow-sm)'

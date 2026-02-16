@@ -13,7 +13,7 @@ export function Card({ title, actions, children, style }: Props) {
       style={{
         background: 'var(--surface)',
         border: '1px solid var(--border)',
-        borderRadius: '12px',
+        borderRadius: '5px',
         padding: '14px',
         boxShadow: 'var(--shadow)',
         ...style

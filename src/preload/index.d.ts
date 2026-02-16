@@ -28,7 +28,18 @@ declare global {
         saleCount?: number
         movementCount?: number
       }>
-      addProduct: (sku: string, name: string, price: number, unit?: string, qty?: number) => Promise<boolean>
+      addProduct: (
+        sku: string,
+        name: string,
+        price: number,
+        unit?: string,
+        qty?: number,
+        barcode?: string
+      ) => Promise<{ success: boolean; productId?: number; barcode?: string }>
+      updateProduct: (
+        productId: number,
+        payload: { sku?: string; name: string; price: number; unit?: string; barcode?: string }
+      ) => Promise<boolean>
       findProduct: (code: string) => Promise<Product | null>
       setStock: (productId: number, qty: number) => Promise<boolean>
       createSale: (payload: {
@@ -41,9 +52,22 @@ declare global {
         { id: number; sale_date: string; total_cents: number; payment_method: string; customer_name?: string }[]
       >
       getSaleItems: (saleId: number) => Promise<
-        { product_name: string; quantity: number; unit_price_cents: number; line_total_cents: number }[]
+        {
+          product_name: string
+          barcode?: string
+          unit?: string
+          quantity: number
+          unit_price_cents: number
+          line_total_cents: number
+        }[]
       >
       payDebt: (customerId: number, amountCents: number) => Promise<boolean>
+      exportSalesExcel: (payload: {
+        headers: string[]
+        rows: (string | number)[][]
+        fileName?: string
+        sheetName?: string
+      }) => Promise<{ success: boolean; cancelled?: boolean; path?: string }>
     }
   }
 }

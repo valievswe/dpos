@@ -19,7 +19,7 @@ export function Badge({ tone = 'muted', children }: Props) {
       style={{
         display: 'inline-flex',
         padding: '4px 8px',
-        borderRadius: 999,
+        borderRadius: 5,
         background: palette.bg,
         color: palette.text,
         fontSize: 12,

@@ -1,9 +1,55 @@
-import { ipcMain } from 'electron'
+import { app, dialog, ipcMain } from 'electron'
+import path from 'path'
+import * as XLSX from 'xlsx'
 import { getDB } from '../db'
 import { PrinterService } from '../services/printers'
 import { mapProductRow } from '../db'
 
 const allowedUnits = new Set(['dona', 'qadoq', 'litr', 'metr'])
+const TASHKENT_SALE_DATE_SQL = "strftime('%Y-%m-%dT%H:%M:%S+05:00', 'now', '+5 hours')"
+const BARCODE_MAX_TRIES = 20
+
+const generateEAN8FromId = (id: number): string => {
+  const padded = id.toString().padStart(7, '0')
+  let sum = 0
+  for (let i = 0; i < padded.length; i++) {
+    const digit = parseInt(padded[i], 10)
+    const weight = i % 2 === 0 ? 3 : 1
+    sum += digit * weight
+  }
+  const check = (10 - (sum % 10)) % 10
+  return padded + check.toString()
+}
+
+const ensureBarcode = (db: any, productId: number): string => {
+  const existingRow = db.prepare('SELECT id, barcode FROM products WHERE id = ?').get(productId) as any
+  if (!existingRow) throw new Error('Mahsulot topilmadi')
+  if (existingRow.barcode && `${existingRow.barcode}`.trim()) return existingRow.barcode
+  let attempt = generateEAN8FromId(productId)
+  let tries = 0
+  while (true) {
+    const existing = db.prepare('SELECT id FROM products WHERE barcode = ?').get(attempt) as any
+    if (!existing || existing.id === productId) {
+      db.prepare('UPDATE products SET barcode = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+        attempt,
+        productId
+      )
+      return attempt
+    }
+    tries += 1
+    attempt = generateEAN8FromId(productId + tries)
+    if (tries > BARCODE_MAX_TRIES) throw new Error("Barkod generatsiya qilib bo'lmadi")
+  }
+}
+
+const ensureMissingBarcodes = (db: any) => {
+  const rows = db.prepare("SELECT id FROM products WHERE barcode IS NULL OR TRIM(barcode) = ''").all() as {
+    id: number
+  }[]
+  rows.forEach((row) => {
+    ensureBarcode(db, row.id)
+  })
+}
 
 export function registerIpcHandlers(): void {
   const db = getDB()
@@ -11,6 +57,7 @@ export function registerIpcHandlers(): void {
   // --- DATABASE HANDLERS ---
 
   ipcMain.handle('get-products', () => {
+    ensureMissingBarcodes(db)
     const stmt = db.prepare('SELECT * FROM products WHERE active = 1 ORDER BY name ASC')
     const rows = stmt.all()
     return rows.map(mapProductRow)
@@ -41,29 +88,41 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     'add-product',
-    (_event, sku: string, name: string, price: number, unit = 'dona', qty: number = 0) => {
+    (_event, sku: string, name: string, price: number, unit = 'dona', qty: number = 0, barcode?: string) => {
       try {
         const normalizedUnit = typeof unit === 'string' ? unit.trim().toLowerCase() : 'dona'
         const safeUnit = allowedUnits.has(normalizedUnit) ? normalizedUnit : 'dona'
         const initialQty = Number.isFinite(qty) && qty >= 0 ? Math.round(qty) : 0
-        const stmt = db.prepare(`
-        INSERT INTO products (sku, name, price_cents, qty, unit)
-        VALUES (?, ?, ?, ?, ?)
-      `)
-        const info = stmt.run(sku.trim(), name.trim(), Math.round(price * 100), initialQty, safeUnit)
-        return info.changes > 0
+        const safeSku = typeof sku === 'string' ? sku.trim() : ''
+        const safeBarcode = typeof barcode === 'string' && barcode.trim() ? barcode.trim() : null
+        const skuValue = safeBarcode || safeSku || `P-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+        const t = db.transaction(() => {
+          const stmt = db.prepare(`
+          INSERT INTO products (sku, name, price_cents, qty, unit, barcode)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `)
+          const info = stmt.run(skuValue, name.trim(), Math.round(price * 100), initialQty, safeUnit, safeBarcode)
+          const productId = Number(info.lastInsertRowid)
+          let finalBarcode = safeBarcode
+          if (!finalBarcode) {
+            finalBarcode = ensureBarcode(db, productId)
+            if (!safeSku) {
+              db.prepare('UPDATE products SET sku = ? WHERE id = ?').run(finalBarcode, productId)
+            }
+          }
+          return { success: info.changes > 0, productId, barcode: finalBarcode ?? undefined }
+        })
+        return t()
       } catch (err) {
         console.error('DB Insert Error:', err)
-        return false
+        return { success: false }
       }
     }
   )
 
   ipcMain.handle('find-product', (_event, code: string) => {
-    const stmt = db.prepare(
-      `SELECT * FROM products WHERE barcode = ? OR sku = ? LIMIT 1`
-    )
-    const row = stmt.get(code, code)
+    const stmt = db.prepare(`SELECT * FROM products WHERE barcode = ? LIMIT 1`)
+    const row = stmt.get(code)
     if (!row) return null
     return mapProductRow(row)
   })
@@ -141,8 +200,8 @@ export function registerIpcHandlers(): void {
         // sale insert
         const saleIns = db
           .prepare(
-            `INSERT INTO sales (customer_id, subtotal_cents, discount_cents, tax_cents, total_cents, payment_method, note)
-             VALUES (?, ?, ?, ?, ?, ?, '')`
+            `INSERT INTO sales (sale_date, customer_id, subtotal_cents, discount_cents, tax_cents, total_cents, payment_method, note)
+             VALUES (${TASHKENT_SALE_DATE_SQL}, ?, ?, ?, ?, ?, ?, '')`
           )
           .run(customerId, subtotal, discount, tax, total, payload.paymentMethod)
         const saleId = Number(saleIns.lastInsertRowid)
@@ -217,7 +276,7 @@ export function registerIpcHandlers(): void {
         `SELECT s.id, s.sale_date, s.total_cents, s.payment_method, c.name as customer_name
          FROM sales s
          LEFT JOIN customers c ON c.id = s.customer_id
-         ORDER BY s.sale_date DESC
+         ORDER BY datetime(s.sale_date) DESC
          LIMIT 50`
       )
       .all()
@@ -227,8 +286,10 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('get-sale-items', (_event, saleId: number) => {
     return db
       .prepare(
-        `SELECT product_name, quantity, unit_price_cents, line_total_cents 
-         FROM sale_items WHERE sale_id = ?`
+        `SELECT si.product_name, si.barcode, si.quantity, si.unit_price_cents, si.line_total_cents, p.unit
+         FROM sale_items si
+         LEFT JOIN products p ON p.id = si.product_id
+         WHERE si.sale_id = ?`
       )
       .all(saleId)
   })
@@ -252,6 +313,73 @@ export function registerIpcHandlers(): void {
     })
     return t()
   })
+
+  ipcMain.handle(
+    'export-sales-excel',
+    async (
+      _event,
+      payload: {
+        headers: string[]
+        rows: (string | number)[][]
+        fileName?: string
+        sheetName?: string
+      }
+    ) => {
+      const safeName = payload.fileName && payload.fileName.trim() ? payload.fileName.trim() : 'sales.xlsx'
+      const defaultPath = path.join(app.getPath('documents'), safeName)
+      const dialogResult = await dialog.showSaveDialog({
+        defaultPath,
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      })
+      if (dialogResult.canceled || !dialogResult.filePath) {
+        return { success: false, cancelled: true }
+      }
+
+      const targetPath = dialogResult.filePath.endsWith('.xlsx')
+        ? dialogResult.filePath
+        : `${dialogResult.filePath}.xlsx`
+      const workbook = XLSX.utils.book_new()
+      const sheet = XLSX.utils.aoa_to_sheet([payload.headers, ...payload.rows])
+      XLSX.utils.book_append_sheet(workbook, sheet, payload.sheetName?.trim() || 'Sales')
+      XLSX.writeFile(workbook, targetPath, { compression: true })
+
+      return { success: true, path: targetPath }
+    }
+  )
+
+  ipcMain.handle(
+    'update-product',
+    (
+      _event,
+      productId: number,
+      payload: { sku?: string; name: string; price: number; unit?: string; barcode?: string }
+    ) => {
+      try {
+        const normalizedUnit = typeof payload.unit === 'string' ? payload.unit.trim().toLowerCase() : 'dona'
+        const safeUnit = allowedUnits.has(normalizedUnit) ? normalizedUnit : 'dona'
+        const current = db.prepare('SELECT sku, barcode FROM products WHERE id = ?').get(productId) as any
+        if (!current) throw new Error('Mahsulot topilmadi')
+        const safeSku = payload.sku?.trim() || current.sku
+        const safeName = payload.name?.trim()
+        const safePrice = Number(payload.price)
+        if (!safeSku || !safeName || !Number.isFinite(safePrice) || safePrice < 0) {
+          throw new Error("Ma'lumotlar noto'g'ri")
+        }
+        const barcode =
+          typeof payload.barcode === 'string' ? (payload.barcode.trim() ? payload.barcode.trim() : null) : current.barcode
+        const res = db
+          .prepare('UPDATE products SET sku = ?, name = ?, price_cents = ?, unit = ?, barcode = ? WHERE id = ?')
+          .run(safeSku, safeName, Math.round(safePrice * 100), safeUnit, barcode, productId)
+        if (!barcode) {
+          ensureBarcode(db, productId)
+        }
+        return res.changes > 0
+      } catch (err) {
+        console.error('DB Update Error:', err)
+        throw err
+      }
+    }
+  )
 
   // --- PRINTER LISTENERS ---
 

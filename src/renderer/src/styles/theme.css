@@ -55,7 +55,7 @@ td {
 
 ::-webkit-scrollbar-thumb {
   background: var(--surface-2);
-  border-radius: 999px;
+  border-radius: 5px;
 }
 
 ::-webkit-scrollbar-track {

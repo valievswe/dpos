@@ -91,10 +91,9 @@ export const PrinterService = {
       )
       .all(saleId)
 
-    const itemsString = items
-      .map((i: any) => `${i.name}|${Math.round(i.unit_price_cents).toString()}`)
-      .join(';')
-    const total = Math.round(sale.total_cents).toString()
+    const formatSom = (cents: number) => (Math.round(cents) / 100).toFixed(2)
+    const itemsString = items.map((i: any) => `${i.name}|${formatSom(i.unit_price_cents)}`).join(';')
+    const total = formatSom(sale.total_cents)
 
     const payload = { printer: printerName, storeName, itemsString, total }
     const jobId = db

@@ -43,8 +43,19 @@ const api = {
     return ipcRenderer.invoke('delete-product', productId, force)
   },
 
-  addProduct: (sku: string, name: string, price: number, unit = 'dona', qty = 0): Promise<boolean> => {
-    return ipcRenderer.invoke('add-product', sku, name, price, unit, qty)
+  addProduct: (
+    sku: string,
+    name: string,
+    price: number,
+    unit = 'dona',
+    qty = 0,
+    barcode?: string
+  ): Promise<{ success: boolean; productId?: number; barcode?: string }> => {
+    return ipcRenderer.invoke('add-product', sku, name, price, unit, qty, barcode)
+  },
+
+  updateProduct: (productId: number, payload: { sku?: string; name: string; price: number; unit?: string; barcode?: string }) => {
+    return ipcRenderer.invoke('update-product', productId, payload)
   },
 
   findProduct: (code: string) => {
@@ -74,6 +85,15 @@ const api = {
 
   payDebt: (customerId: number, amountCents: number) => {
     return ipcRenderer.invoke('pay-debt', customerId, amountCents)
+  },
+
+  exportSalesExcel: (payload: {
+    headers: string[]
+    rows: (string | number)[][]
+    fileName?: string
+    sheetName?: string
+  }) => {
+    return ipcRenderer.invoke('export-sales-excel', payload)
   }
 }
 

@@ -17,7 +17,7 @@ export function Input({ label, hint, style, ...rest }: Props) {
           background: 'var(--surface-2)',
           border: '1px solid var(--border)',
           color: 'var(--text)',
-          borderRadius: '8px',
+          borderRadius: '5px',
           padding: '10px 12px',
           outline: 'none',
           width: '100%',

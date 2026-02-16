@@ -1,7 +1,7 @@
 ﻿# Do'kondor - POS System Codebase Documentation
 
-> **AI-Friendly Reference**  
-> Last Updated: 2026-02-13  
+> **AI-Friendly Reference**
+> Last Updated: 2026-02-15
 > Version: 2.0.0
 
 ---
@@ -24,14 +24,13 @@
 
 ## Project Overview
 
-**Do'kondor** is an offline-first Electron POS tailored for Uzbek retail stores. It combines a SQLite (better-sqlite3) data layer, barcode and receipt printing through bundled C++ utilities, and a React-based selling experience. Key capabilities:
+**Do'kondor** is an offline-first Electron POS tailored for Uzbek retail stores. It combines a SQLite (better-sqlite3) data layer, barcode and receipt printing through bundled executables, and a React-based selling experience. Key capabilities:
 
-- Inventory onboarding and stock adjustments with automatic barcode generation.
-- Fast cart building from SKU, barcode scan, or quick search, including customer-linked debt sales.
-- Sales ledger with receipt reprints, payment history, and summary list.
-- Print job journaling for both barcode and receipt printers to improve observability.
+- Inventory onboarding with unit selection, barcode auto-generation, and stock adjustments.
+- Fast cart building from barcode scans or search, including debt sales tied to customers.
+- Sales ledger with reprints, date range filters, and Excel export.
+- Print job journaling for both barcode and receipt printers.
 - Auto-migration logic for older databases to the new schema.
-- Product creation supports unit selection and initial stock entry; barcode printing allows per-job printer choice.
 
 ---
 
@@ -41,9 +40,9 @@
 
 | Tier | Location | Responsibilities |
 |------|----------|------------------|
-| **Main process** | `src/main` | Window lifecycle, SQLite access, transactional sales logic, IPC handlers, printer orchestration. |
+| **Main process** | `src/main` | Window lifecycle, SQLite access, transactional sales logic, IPC handlers, printer orchestration, Excel export. |
 | **Preload** | `src/preload` | Context isolation bridge that exposes a curated `window.api` surface to the renderer. |
-| **Renderer** | `src/renderer` | React UI (Sales console, product manager, sales history). |
+| **Renderer** | `src/renderer` | React UI (Sales console, product manager, sales history, debts). |
 
 ### Runtime Flow
 
@@ -53,13 +52,14 @@ graph TD
     P -->|ipcRenderer.invoke/send| M[IPC Handlers]
     M -->|SQL| D[(SQLite DB)]
     M -->|execFile| X[Printer EXEs]
+    M -->|dialog + XLSX| F[Excel File]
     D -->|better-sqlite3| M
     X -->|print jobs & status| M
 ```
 
 - **State** lives in SQLite (WAL mode). Renderer never talks to the DB directly.
 - **Transactions** (better-sqlite3 `.transaction`) guarantee that sales, stock deductions, debt tracking, and print queue inserts succeed atomically.
-- **Printing** uses synchronous `execFile` calls plus persisted `print_jobs` rows so failures can be retried.
+- **Printing** uses synchronous `execFile` calls plus persisted `print_jobs` rows so failures can be audited.
 
 ---
 
@@ -79,12 +79,17 @@ L- renderer/
    +- index.html
    L- src/
       +- main.tsx           # React entry
-      +- App.tsx            # Layout composition
-      L- components/
-         +- Header.tsx
-         +- SalesPage.tsx
-         +- ProductManager.tsx
-         L- SalesHistory.tsx
+      +- App.tsx            # Layout composition + section switcher
+      +- hooks/useProducts.ts
+      +- lib/classNames.ts
+      +- components/
+      ¦  +- Sidebar.tsx
+      ¦  +- SalesPage.tsx
+      ¦  +- ProductManager.tsx
+      ¦  +- SalesHistory.tsx
+      ¦  +- Debts.tsx
+      ¦  L- ui/ (Button, Modal, Pagination, DateRangeFilter, etc.)
+      +- styles/ (CSS variables + global styles)
 ```
 
 Supporting files:
@@ -104,23 +109,30 @@ Supporting files:
 
 ### Database Layer (`src/main/db/index.ts`)
 - Stores data at `{app.getPath('userData')}/pos_system.db`.
-- Applies critical PRAGMAs: `foreign_keys`, `journal_mode = WAL`, `busy_timeout`, `synchronous = NORMAL`.
+- Applies PRAGMAs: `foreign_keys`, `journal_mode = WAL`, `busy_timeout`, `synchronous = NORMAL`.
 - Creates and migrates tables for products, customers, sales, sale_items, payments, stock_movements, debts, debt_transactions, and print_jobs.
-- `migrateLegacyProducts()` inspects schema via `PRAGMA table_info` to backfill new columns (barcode, money-in-cents fields, timestamps) without dropping data.
-- `mapProductRow()` normalizes DB rows to renderer expectations (price in sums, qty => stock).
+- `migrateLegacyProducts()` inspects schema via `PRAGMA table_info` to backfill new columns (barcode, cents fields, timestamps) without dropping data.
+- `mapProductRow()` normalizes DB rows to renderer expectations (price in so'm, qty => stock).
 
 ### IPC Handlers (`src/main/ipc/index.ts`)
 Handlers are registered once on app start. Highlights:
 
-- **Inventory**: `get-products`, `add-product`, `find-product`, `set-stock` (writes `stock_movements`).
-- **Sales**: `create-sale` enforces stock availability, manages customer onboarding, computes totals/discount/tax, writes `sales`, `sale_items`, `payments` or debt records, and decrements inventory in a single transaction.
-- **Ledger**: `get-sales` returns the latest 50 sales with customer name, `get-sale-items` fetches line items, `pay-debt` logs into `debt_transactions` and closes open `debts` rows.
+- **Inventory**:
+  - `get-products` returns only active rows (`active = 1`) and auto-generates missing barcodes before returning data.
+  - `delete-product` performs a soft delete and surfaces historical `sale_items` / `stock_movements` counts; requires an explicit `force` when history exists.
+  - `add-product` enforces a unit whitelist (`dona|qadoq|litr|metr`), rounds price to cents, clamps initial qty to a non-negative integer, and can auto-generate barcode + SKU.
+  - `update-product` validates fields and updates SKU/name/price/unit/barcode; if barcode is blank, it is auto-generated.
+  - `find-product` looks up **barcode only**.
+  - `set-stock` logs an `adjustment` entry in `stock_movements` with old/new qty.
+- **Sales**: `create-sale` enforces stock availability, deduplicates customers by phone when provided, computes totals/discount/tax, writes `sales`, `sale_items`, and inventory movements in a single transaction.
+- **Ledger**: `get-sales` returns the latest 50 sales with customer name, `get-sale-items` fetches line items with unit/barcode, `pay-debt` logs into `debt_transactions` and closes open `debts` rows.
+- **Export**: `export-sales-excel` opens a save dialog and writes an `.xlsx` file using the provided headers + rows.
 - **Printing**: `trigger-print`/`trigger-receipt` support legacy fire-and-forget flows, while `print-barcode-product` and `print-receipt-sale` ensure a `print_jobs` ledger row per attempt and return success/failure to the renderer.
 
 ### Printer Service (`src/main/services/printers.ts`)
 - Resolves executable path depending on `app.isPackaged`; in dev it falls back to `resources/bin` under repo root and surfaces missing-binary errors early.
-- `printLabelByProduct` lazily generates an EAN-8 barcode when none exists (using `generateEAN8FromId` + collision retries), accepts `printerName`, logs to `print_jobs`, and runs `testbarcode.exe` `copies` times.
-- `printReceiptBySale` rehydrates sale totals + items, formats the legacy `name|price` string, inserts a queued job, and executes `receipt.exe`.
+- `printLabelByProduct` lazily generates an EAN-8 barcode when none exists, accepts `printerName`, logs to `print_jobs`, and runs `testbarcode.exe` `copies` times.
+- `printReceiptBySale` rehydrates sale totals + items, formats the legacy `name|unit_price` string, inserts a queued job, and executes `receipt.exe`.
 - Both methods update `print_jobs.status` to `done` or `failed` with `error` text for observability.
 
 ### Preload Bridge (`src/preload/index.ts`)
@@ -133,25 +145,30 @@ Handlers are registered once on app start. Highlights:
 ## Feature Workflows
 
 ### Inventory Lifecycle
-1. Clerk opens the add-product modal and enters SKU/name/price/unit/initial qty in `ProductManager`.
-2. Renderer calls `window.api.addProduct` > `ipcMain.handle('add-product')` inserts row (price stored in cents) with provided unit and qty (default 0).
-3. Stock adjustments use `set-stock`, logging every change into `stock_movements` with before/after qty.
-4. Barcode labels are requested with `printBarcodeByProduct` (optionally pass `printerName`), which ensures the product has a barcode and queues the print job.
+1. Clerk opens the add-product modal and enters name/price/unit/initial qty; barcode is optional.
+2. Renderer calls `window.api.addProduct` and receives `{ productId, barcode }` on success.
+3. If barcode was empty, the system generates an EAN-8 barcode and, when SKU was missing, sets SKU to the new barcode.
+4. Stock adjustments use `set-stock`, logging every change into `stock_movements` with before/after qty.
+5. Barcode labels are requested with `printBarcodeByProduct`, which queues a print job and executes `testbarcode.exe`.
+6. Product edits use `updateProduct` to change name/price/unit/barcode and auto-fill a barcode when blank.
 
 ### Sales & Debt Workflow
-1. `SalesPage` builds a cart from manual search, quick list, or barcode scanner input via `find-product` fallback.
-2. Checkout posts `create-sale` payload containing `items`, `paymentMethod`, optional discount, and customer data if the sale is on debt.
-3. The transaction verifies stock, computes totals, writes `sales`/`sale_items`, and decreases qty per line. Payments table receives cash/card entries; debt sales create `debt_transactions` + `debts` snapshot and increment `customers.debt_cents`.
-4. Any outstanding customer balance can later be reduced via `pay-debt`, which logs a payment transaction and marks oldest open debts as paid once thresholds are met.
+1. `SalesPage` builds a cart from barcode scans or search suggestions.
+2. Checkout posts `create-sale` payload containing `items`, `paymentMethod`, optional discount, and customer data for debt sales.
+3. The transaction verifies stock, computes totals, writes `sales`/`sale_items`, and decreases qty per line.
+4. Payments are stored in `payments` for `cash` or `card`; debt sales create `debt_transactions` + `debts` snapshot and increment `customers.debt_cents`.
+5. After a successful sale the renderer can call `printReceiptBySale` so the print uses persisted sale data.
+6. Outstanding customer balance can be reduced via `pay-debt`, which logs a payment transaction and marks open debts as paid when thresholds are met.
 
-### Sales History & Reprints
-- `SalesHistory` fetches the 50 most recent sales for quick review.
-- Selecting a sale triggers `get-sale-items` so the UI can display line-level totals.
+### Sales History, Filters, and Excel Export
+- `SalesHistory` fetches the 50 most recent sales for quick review, with client-side filters (payment type, text search, date range) and pagination.
+- Selecting a sale triggers `get-sale-items` to display line-level totals in a modal.
 - Clicking “Chek chiqarish” invokes `printReceiptBySale`, which reuses persisted sale data instead of recomputing totals in the renderer.
+- “Excel eksport” gathers sale items per sale and calls `exportSalesExcel`, which prompts for a file path and writes the `.xlsx` file.
 
 ### Printing Strategy
 - Legacy `printBarcode` and `printReceipt` functions still exist for compatibility but do not write to `print_jobs`.
-- Newer receipt/barcode printing endpoints store structured payloads first, then execute the binary so offline auditing and retries are possible.
+- Job-backed endpoints store structured payloads first, then execute the binary so offline auditing and retries are possible.
 - Barcode printing accepts a per-job printer name and fails fast if the binary is missing in dev/prod paths.
 
 ---
@@ -160,21 +177,23 @@ Handlers are registered once on app start. Highlights:
 
 | Table | Purpose | Key Columns |
 |-------|---------|-------------|
-| `products` | Inventory catalog. | `sku` (unique), `barcode`, `unit`, `cost_cents`, `price_cents`, `qty`, `min_stock`, timestamps. |
-| `customers` | Customer directory + rolling debt. | `name`, `phone` (unique), `debt_cents`, timestamps. |
-| `sales` | Sale headers. | `customer_id`, `sale_date`, subtotal/discount/tax/total cents, `payment_method`, `note`. |
-| `sale_items` | Line-level detail. | `sale_id` FK, `product_id`, cached metadata, `quantity`, `unit_price_cents`, `line_total_cents`, `profit_cents`. |
-| `payments` | Cash/card settlement history. | `sale_id`, `method`, `amount_cents`. |
-| `stock_movements` | Audit trail for all qty changes. | `movement_type` enum, `quantity_change`, `old_qty`, `new_qty`, optional references. |
+| `products` | Inventory catalog. | `sku` (unique), `barcode`, `unit`, `cost_cents`, `price_cents`, `qty` (REAL), `min_stock`, `active`, timestamps. |
+| `customers` | Customer directory + rolling debt. | `name`, `phone` (unique), `email`, `address`, `debt_cents`, timestamps. |
+| `sales` | Sale headers. | `customer_id`, `sale_date` (Tashkent time), subtotal/discount/tax/total cents, `payment_method`, `note`. |
+| `sale_items` | Line-level detail. | `sale_id` FK, `product_id`, `product_name`, `barcode`, `quantity`, `unit_price_cents`, `cost_cents`, `line_total_cents`, `profit_cents`. |
+| `payments` | Cash/card settlement history. | `sale_id`, `method` (`cash`/`card`), `amount_cents`. |
+| `stock_movements` | Audit trail for all qty changes. | `movement_type` (`initial|receive|sale|return|adjustment`), `quantity_change`, `old_qty`, `new_qty`, pricing context, timestamps. |
 | `debts` | Snapshot of outstanding balances per sale. | `customer_id`, `description`, `total_cents`, `paid_cents`, `is_paid`, `due_date`. |
-| `debt_transactions` | Event log of debt added vs payments. | `type` enum (`debt_added`, `payment`), `amount_cents`, `note`. |
-| `print_jobs` | Persistence layer for prints. | `kind` enum, `product_id`/`sale_id`, `copies`, `status`, `payload`, `error`, timestamps. |
+| `debt_transactions` | Event log of debt added vs payments. | `type` (`debt_added|payment`), `amount_cents`, `note`. |
+| `print_jobs` | Persistence layer for prints. | `kind` (`barcode|receipt`), `copies`, `status` (`queued|sent|failed|done`), `payload`, `error`, timestamps. |
 
-**Indexes & Triggers** (see `INDEXES_AND_TRIGGERS` string):
+Soft deletes: Products are deactivated by setting `active = 0`; `get-products` filters on this flag while historical references remain intact.
+
+Indexes & triggers (see `INDEXES_AND_TRIGGERS` string):
 - Search helpers: products by `barcode` and `name`, sales by date, sale items by product, stock movements by product+date, customers by phone, debts by customer+status.
 - Update triggers keep `products.updated_at` and `customers.updated_at` fresh after every update.
 
-**Money Handling**: All monetary values are stored as integer cents to avoid floating point drift. Renderer converts back to so'm via division by 100.
+Money handling: All monetary values are stored as integer cents to avoid floating point drift. Renderer converts back to so'm via division by 100.
 
 ---
 
@@ -182,17 +201,20 @@ Handlers are registered once on app start. Highlights:
 
 | Renderer Call | IPC Channel | Location | Notes |
 |---------------|-------------|----------|-------|
-| `window.api.getProducts()` | `get-products` | `src/main/ipc/index.ts` | Returns active products sorted by name, using `mapProductRow`. |
-| `window.api.addProduct(sku, name, price, unit?, qty?)` | `add-product` | same | Price converted to cents; unit defaults to `dona`; qty defaults to 0. |
-| `window.api.findProduct(code)` | `find-product` | same | Looks up by barcode or SKU. |
+| `window.api.getProducts()` | `get-products` | `src/main/ipc/index.ts` | Returns active products sorted by name, auto-fills missing barcodes. |
+| `window.api.deleteProduct(id, force?)` | `delete-product` | same | Soft delete; when history exists returns counts and `requiresConfirmation` until forced. |
+| `window.api.addProduct(sku, name, price, unit?, qty?, barcode?)` | `add-product` | same | Price converted to cents; unit coerced to whitelist; qty rounded and clamped to 0+. |
+| `window.api.updateProduct(productId, payload)` | `update-product` | same | Updates SKU/name/price/unit/barcode and auto-generates barcode if blank. |
+| `window.api.findProduct(code)` | `find-product` | same | Barcode-only lookup. |
 | `window.api.setStock(productId, qty)` | `set-stock` | same | Wraps movement logging transaction. |
-| `window.api.createSale(payload)` | `create-sale` | same | Transactional checkout, returns `{ saleId, total_cents }`. |
+| `window.api.createSale(payload)` | `create-sale` | same | Transactional checkout; returns `{ saleId, total_cents }`. |
 | `window.api.getSales()` | `get-sales` | same | Latest 50 rows with customer join. |
-| `window.api.getSaleItems(saleId)` | `get-sale-items` | same | Returns product_name, quantity, pricing info. |
+| `window.api.getSaleItems(saleId)` | `get-sale-items` | same | Returns product_name, barcode, unit, quantity, pricing info. |
 | `window.api.payDebt(customerId, amountCents)` | `pay-debt` | same | Logs payment and updates open debts. |
+| `window.api.exportSalesExcel(payload)` | `export-sales-excel` | same | Opens save dialog, writes `.xlsx`. |
 | `window.api.printBarcode(...)` | `trigger-print` | same | Legacy fire-and-forget. |
 | `window.api.printReceipt(...)` | `trigger-receipt` | same | Legacy fire-and-forget. |
-| `window.api.printBarcodeByProduct(productId, copies?, printerName?)` | `print-barcode-product` | same | Inserts `print_jobs` row, resolves binary path, allows printer override, then runs binary. |
+| `window.api.printBarcodeByProduct(productId, copies?, printerName?)` | `print-barcode-product` | same | Inserts `print_jobs` row, resolves binary path, runs binary. |
 | `window.api.printReceiptBySale(saleId, printerName?)` | `print-receipt-sale` | same | Returns `{ success, error? }`. |
 
 Every invoke-based handler propagates thrown errors to the renderer (caught as rejected Promise). Caller components display friendly messages around these failures.
@@ -203,24 +225,26 @@ Every invoke-based handler propagates thrown errors to the renderer (caught as r
 
 | Component | File | Responsibilities |
 |-----------|------|------------------|
-| `App` | `src/renderer/src/App.tsx` | High-level layout. Renders `Header`, `SalesPage`, `ProductManager`, `SalesHistory`. |
-| `Header` | `components/Header.tsx` | Simple nav/title placeholder. |
-| `SalesPage` | `components/SalesPage.tsx` | Cart UX, barcode scanning, search suggestions, checkout with discount, payment mode (cash/card/debt), and debt-only customer capture. Uses `window.api.findProduct`, `createSale`, etc. |
-| `ProductManager` | `components/ProductManager.tsx` | CRUD-lite interface with modal product creation (unit + initial qty), stock adjustments, and barcode printing with printer selection. Maintains inline error/loading states. |
-| `SalesHistory` | `components/SalesHistory.tsx` | Lists last 50 sales, fetches detailed items on selection, reprints receipts via `printReceiptBySale`. |
+| `App` | `src/renderer/src/App.tsx` | Layout shell with collapsible `Sidebar`; switches between Sales, Inventory, History, and Debts sections. |
+| `Sidebar` | `components/Sidebar.tsx` | Navigation + collapse control, displays app title. |
+| `SalesPage` | `components/SalesPage.tsx` | Cart UX, barcode scanning, search suggestions, checkout with discount, payment mode (cash/card/debt), optional receipt prompt post-sale. |
+| `ProductManager` | `components/ProductManager.tsx` | Create/edit products, update stock, soft delete, barcode printing with printer selection, and paginated listing. |
+| `SalesHistory` | `components/SalesHistory.tsx` | Lists last 50 sales with search/payment/date filters, paginated; drills into line items and reprints receipts; exports to Excel. |
+| `Debts` | `components/Debts.tsx` | Minimal form to post payments using `payDebt`; roadmap panel for future debt views. |
+| `UI atoms` | `components/ui/*` | Shared controls (`Button`, `Modal`, `Pagination`, `DateRangeFilter`, etc.) used across History/ProductManager. |
 
-Renderer relies solely on inline styles today, but components are small and can be restyled without touching business logic.
+Renderer uses inline style objects for most layout and styling, with theme variables and globals defined in CSS.
 
 ---
 
 ## Printer & External Integrations
 
 - Executables (`testbarcode.exe`, `receipt.exe`) are packaged inside `resources/bin` (dev) or `process.resourcesPath/bin` (prod).
-- Printer names are currently hardcoded (`label` and `receipt`). If deployments differ, update `PrinterService` constants or add configuration.
+- Printer names default to `label` and `receipt`, but `printBarcodeByProduct` and `printReceiptBySale` accept overrides.
 - `runExec()` wraps `execFile` in a Promise for easier `async/await` usage inside the printer service.
 - Print payload examples:
   - Barcode: `{ printer: 'label', barcode: '00012345', name: 'Tea', copies: 2 }`.
-  - Receipt: `{ printer: 'receipt', storeName: "Do'kon", itemsString: 'Tea|15000;Sugar|12000', total: '27000' }`.
+  - Receipt: `{ printer: 'receipt', storeName: "Do'kon", itemsString: 'Tea|15000.00;Sugar|12000.00', total: '27000.00' }`.
 
 Failure handling: when binaries fail, the corresponding `print_jobs` row records `status = 'failed'` and `error = err.message`; renderer receives a `{ success: false, error }` response for receipt prints.
 
@@ -230,14 +254,14 @@ Failure handling: when binaries fail, the corresponding `print_jobs` row records
 
 | Script | Purpose |
 |--------|---------|
-| `npm run dev` | electron-vite development mode (type-safe React + Electron with HMR).
-| `npm run build` | Type checks both node/web targets then builds all entry points.
-| Platform builds (`build:win`, `build:mac`, `build:linux`) | Run build + electron-builder for platform-specific artifacts.
-| `npm run typecheck` | Convenience alias for both `tsconfig.node.json` and `tsconfig.web.json`.
-| `npm run lint` | ESLint over the full monorepo.
-| `npm run format` | Prettier across the repo.
+| `npm run dev` | electron-vite development mode (type-safe React + Electron with HMR). |
+| `npm run build` | Type checks both node/web targets then builds all entry points. |
+| Platform builds (`build:win`, `build:mac`, `build:linux`) | Run build + electron-builder for platform-specific artifacts. |
+| `npm run typecheck` | Convenience alias for both `tsconfig.node.json` and `tsconfig.web.json`. |
+| `npm run lint` | ESLint over the full monorepo. |
+| `npm run format` | Prettier across the repo. |
 
-**Packaging Notes**:
+Packaging Notes:
 - `electron-builder.yml` sets `asarUnpack` to `resources/bin/**` so the printer executables remain extractable at runtime.
 - Auto updates rely on `electron-updater` and `dev-app-update.yml`; configure the feed URL before shipping.
 
@@ -247,12 +271,13 @@ Failure handling: when binaries fail, the corresponding `print_jobs` row records
 
 - Database path (Windows dev): `%APPDATA%/Do'kondor/pos_system.db` (actual folder depends on appId `com.owner.app`).
 - Money helper: always convert renderer so'm input via `Math.round(price * 100)` before storing.
+- Unit whitelist: `dona`, `qadoq`, `litr`, `metr`; anything else is coerced to `dona` in `add-product` and `update-product`.
+- Product deletion is soft (`active = 0`); use `window.api.deleteProduct` so history remains intact.
 - All renderer-to-main calls must go through `window.api`; never reach into `ipcRenderer` directly to keep context isolation intact.
+- Excel export uses `exportSalesExcel` and opens a system save dialog from the main process.
 - When adding a new backend capability:
   1. Implement SQL + handler in `src/main/ipc/index.ts`.
   2. Expose matching method in `src/preload/index.ts` and update `index.d.ts`.
   3. Consume via `window.api` in React.
-- To inspect DB quickly during dev: `sqlite3 %APPDATA%/Do'kondor/pos_system.db` and run SQL queries (`.schema`, `SELECT * FROM print_jobs ORDER BY id DESC LIMIT 5;`).
 
-This document now reflects the expanded multi-table schema, transactional sales logic, and print job journaling introduced in version 2.0.0.
-
+This document reflects the current schema, IPC surface, and UI flows as of 2026-02-15.

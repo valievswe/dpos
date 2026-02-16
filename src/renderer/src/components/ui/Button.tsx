@@ -7,7 +7,7 @@ type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
 }
 
 const base: React.CSSProperties = {
-  borderRadius: 8,
+  borderRadius: 5,
   fontWeight: 700,
   cursor: 'pointer',
   transition: 'all 120ms ease',

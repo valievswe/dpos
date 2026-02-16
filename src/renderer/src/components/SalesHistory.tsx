@@ -12,19 +12,65 @@ type SaleRow = {
   customer_name?: string
 }
 
+const TASHKENT_TZ = 'Asia/Tashkent'
+
+const parseSaleDate = (raw: string): Date | null => {
+  if (!raw) return null
+  const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T')
+  const hasZone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(normalized)
+  const parsed = new Date(hasZone ? normalized : `${normalized}Z`)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
 export function SalesHistory(): React.ReactElement {
   const [rows, setRows] = useState<SaleRow[]>([])
   const [selected, setSelected] = useState<number | null>(null)
   const [items, setItems] = useState<
-    { product_name: string; quantity: number; unit_price_cents: number; line_total_cents: number }[]
+    {
+      product_name: string
+      barcode?: string
+      unit?: string
+      quantity: number
+      unit_price_cents: number
+      line_total_cents: number
+    }[]
   >([])
   const [selectedRow, setSelectedRow] = useState<SaleRow | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [paymentFilter, setPaymentFilter] = useState<'all' | 'cash' | 'card' | 'debt' | 'mixed'>('all')
+  const [paymentFilter, setPaymentFilter] = useState<'all' | 'cash' | 'card' | 'debt'>('all')
   const [search, setSearch] = useState('')
   const [dateRange, setDateRange] = useState<{ from?: string; to?: string }>({})
   const [page, setPage] = useState(1)
+  const [exporting, setExporting] = useState(false)
   const pageSize = 10
+  const tzFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat('uz-UZ', {
+        timeZone: TASHKENT_TZ,
+        dateStyle: 'short',
+        timeStyle: 'short'
+      }),
+    []
+  )
+  const tzDateKeyFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat('en-CA', {
+        timeZone: TASHKENT_TZ,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }),
+    []
+  )
+  const formatSaleDate = (raw: string) => {
+    const parsed = parseSaleDate(raw)
+    return parsed ? tzFormatter.format(parsed) : '-'
+  }
+  const paymentLabel = (method: string) => {
+    const labels: Record<string, string> = { cash: 'Naqd', card: 'Karta', debt: 'Qarz' }
+    return labels[method] ?? method
+  }
+  const formatUnit = (unit?: string) => (unit ? unit.toLowerCase() : '')
 
   const load = async () => {
     try {
@@ -59,6 +105,58 @@ export function SalesHistory(): React.ReactElement {
     }
   }
 
+  const exportExcel = async () => {
+    if (exporting) return
+    if (filteredRows.length === 0) {
+      setError("Eksport uchun sotuv yo'q")
+      return
+    }
+    setExporting(true)
+    setError(null)
+    try {
+      const headers = ['ID', 'Mahsulot', 'Barkod', 'Miqdor', 'Birlik', "Jami (so'm)", "To'lov", 'Mijoz', 'Sana']
+      const saleItems = await Promise.all(
+        filteredRows.map(async (r) => {
+          const its = await window.api.getSaleItems(r.id)
+          return { sale: r, items: its }
+        })
+      )
+      let totalSalesCents = 0
+      const rows = saleItems.flatMap(({ sale, items }) =>
+        items.map((i) => {
+          totalSalesCents += Math.round(i.line_total_cents)
+          const unit = formatUnit(i.unit)
+          return [
+            sale.id,
+            i.product_name,
+            i.barcode ?? '',
+            i.quantity,
+            unit,
+            Math.round(i.line_total_cents) / 100,
+            paymentLabel(sale.payment_method),
+            sale.customer_name ?? '',
+            formatSaleDate(sale.sale_date)
+          ]
+        })
+      )
+      rows.push(['Jami', '', '', '', '', totalSalesCents / 100, '', '', ''])
+      const fileName = `sales_items_${tzDateKeyFormatter.format(new Date())}.xlsx`
+      const res = await window.api.exportSalesExcel({
+        headers,
+        rows,
+        fileName,
+        sheetName: 'Sales'
+      })
+      if (!res.success && !res.cancelled) {
+        setError('Eksport qilishda xatolik')
+      }
+    } catch {
+      setError('Eksport qilishda xatolik')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   useEffect(() => {
     setPage(1)
   }, [paymentFilter, search, dateRange])
@@ -67,24 +165,30 @@ export function SalesHistory(): React.ReactElement {
     return rows.filter((r) => {
       const matchesPayment = paymentFilter === 'all' || r.payment_method === paymentFilter
       const term = search.trim().toLowerCase()
+      const saleDate = parseSaleDate(r.sale_date)
+      const saleDateKey = saleDate ? tzDateKeyFormatter.format(saleDate) : ''
       const matchesSearch =
         !term ||
         r.customer_name?.toLowerCase().includes(term) ||
         r.id.toString().includes(term) ||
-        r.sale_date.toLowerCase().includes(term)
+        r.sale_date.toLowerCase().includes(term) ||
+        (saleDate ? tzFormatter.format(saleDate).toLowerCase().includes(term) : false)
 
       let matchesDate = true
+      if (dateRange.from || dateRange.to) {
+        if (!saleDateKey) {
+          matchesDate = false
+        }
+      }
       if (dateRange.from) {
-        matchesDate = matchesDate && new Date(r.sale_date) >= new Date(dateRange.from)
+        matchesDate = matchesDate && saleDateKey >= dateRange.from
       }
       if (dateRange.to) {
-        const end = new Date(dateRange.to)
-        end.setHours(23, 59, 59, 999)
-        matchesDate = matchesDate && new Date(r.sale_date) <= end
+        matchesDate = matchesDate && saleDateKey <= dateRange.to
       }
       return matchesPayment && matchesSearch && matchesDate
     })
-  }, [rows, paymentFilter, search, dateRange])
+  }, [rows, paymentFilter, search, dateRange, tzFormatter, tzDateKeyFormatter])
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize))
   useEffect(() => {
@@ -97,7 +201,7 @@ export function SalesHistory(): React.ReactElement {
       style={{
         padding: '18px',
         border: '1px solid var(--border)',
-        borderRadius: '10px',
+        borderRadius: '5px',
         background: 'var(--surface-2)',
         boxShadow: 'var(--shadow-sm)'
       }}
@@ -111,7 +215,7 @@ export function SalesHistory(): React.ReactElement {
             placeholder="ID / sana / mijoz"
             style={{
               padding: '10px 12px',
-              borderRadius: '10px',
+              borderRadius: '5px',
               border: '1px solid var(--border)',
               background: 'var(--surface-3)',
               color: '#f9fafb',
@@ -123,7 +227,7 @@ export function SalesHistory(): React.ReactElement {
             onChange={(e) => setPaymentFilter(e.target.value as any)}
             style={{
               padding: '10px',
-              borderRadius: '10px',
+              borderRadius: '5px',
               border: '1px solid var(--border)',
               background: 'var(--surface-3)',
               color: '#f9fafb'
@@ -133,10 +237,12 @@ export function SalesHistory(): React.ReactElement {
             <option value="cash">Naqd</option>
             <option value="card">Karta</option>
             <option value="debt">Qarz</option>
-            <option value="mixed">Aralash</option>
           </select>
           <Button variant="ghost" size="sm" onClick={load}>
             Yangilash
+          </Button>
+          <Button variant="outline" size="sm" onClick={exportExcel} disabled={exporting}>
+            {exporting ? 'Eksport...' : 'Excel eksport'}
           </Button>
         </div>
       </div>
@@ -150,7 +256,7 @@ export function SalesHistory(): React.ReactElement {
       </div>
 
       {error && <div style={{ color: 'var(--danger)', marginBottom: '8px' }}>{error}</div>}
-      <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+      <div style={{ border: '1px solid var(--border)', borderRadius: 5, overflow: 'hidden' }}>
         <div style={{ background: 'var(--surface-3)', borderBottom: '1px solid var(--border-soft)' }}>
           <div
             style={{
@@ -186,7 +292,7 @@ export function SalesHistory(): React.ReactElement {
               }}
             >
               <div style={{ fontWeight: 700 }}>{r.id}</div>
-              <div style={{ color: '#e5e7eb' }}>{new Date(r.sale_date).toLocaleString('uz-UZ')}</div>
+              <div style={{ color: '#e5e7eb' }}>{formatSaleDate(r.sale_date)}</div>
               <div style={{ color: 'var(--accent)', fontWeight: 800 }}>
                 {(r.total_cents / 100).toLocaleString('uz-UZ')} so'm
               </div>
@@ -195,15 +301,14 @@ export function SalesHistory(): React.ReactElement {
                   const styles: Record<string, { bg: string; color: string; label: string }> = {
                     cash: { bg: 'rgba(52,211,153,0.14)', color: '#bbf7d0', label: 'Naqd' },
                     card: { bg: 'rgba(59,130,246,0.14)', color: '#c7d2fe', label: 'Karta' },
-                    debt: { bg: 'rgba(251,191,36,0.14)', color: '#fef3c7', label: 'Qarz' },
-                    mixed: { bg: 'rgba(168,85,247,0.14)', color: '#ede9fe', label: 'Aralash' }
+                    debt: { bg: 'rgba(251,191,36,0.14)', color: '#fef3c7', label: 'Qarz' }
                   }
                   const token = styles[r.payment_method] ?? styles.cash
                   return (
                     <span
                       style={{
                         padding: '6px 10px',
-                        borderRadius: 999,
+                        borderRadius: 5,
                         background: token.bg,
                         color: token.color,
                         fontWeight: 700,
@@ -249,33 +354,43 @@ export function SalesHistory(): React.ReactElement {
         width={640}
       >
         {selectedRow && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
-            <div>
-              <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Sana</div>
-              <div style={{ fontWeight: 700 }}>{new Date(selectedRow.sale_date).toLocaleString('uz-UZ')}</div>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1.2fr 1fr',
+              gap: 12,
+              marginBottom: 14,
+              padding: '10px 12px',
+              border: '1px solid var(--border)',
+              borderRadius: 5,
+              background: 'var(--surface-3)'
+            }}
+          >
+            <div style={{ display: 'grid', gap: 6 }}>
+              <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Sana va vaqt</div>
+              <div style={{ fontWeight: 750 }}>{formatSaleDate(selectedRow.sale_date)}</div>
             </div>
-            <div>
+            <div style={{ display: 'grid', gap: 6 }}>
               <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Jami</div>
-              <div style={{ color: 'var(--accent)', fontWeight: 800 }}>
+              <div style={{ color: 'var(--accent)', fontWeight: 800, fontSize: '1.1rem' }}>
                 {(selectedRow.total_cents / 100).toLocaleString('uz-UZ')} so'm
               </div>
             </div>
-            <div>
+            <div style={{ display: 'grid', gap: 6 }}>
               <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>To'lov</div>
               <div>
                 {(() => {
                   const styles: Record<string, { bg: string; color: string; label: string }> = {
                     cash: { bg: 'rgba(52,211,153,0.14)', color: '#bbf7d0', label: 'Naqd' },
                     card: { bg: 'rgba(59,130,246,0.14)', color: '#c7d2fe', label: 'Karta' },
-                    debt: { bg: 'rgba(251,191,36,0.14)', color: '#fef3c7', label: 'Qarz' },
-                    mixed: { bg: 'rgba(168,85,247,0.14)', color: '#ede9fe', label: 'Aralash' }
+                    debt: { bg: 'rgba(251,191,36,0.14)', color: '#fef3c7', label: 'Qarz' }
                   }
                   const token = styles[selectedRow.payment_method] ?? styles.cash
                   return (
                     <span
                       style={{
                         padding: '6px 10px',
-                        borderRadius: 999,
+                        borderRadius: 5,
                         background: token.bg,
                         color: token.color,
                         fontWeight: 700,
@@ -288,7 +403,7 @@ export function SalesHistory(): React.ReactElement {
                 })()}
               </div>
             </div>
-            <div>
+            <div style={{ display: 'grid', gap: 6 }}>
               <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Mijoz</div>
               <div>{selectedRow.customer_name ?? '-'}</div>
             </div>
@@ -298,7 +413,7 @@ export function SalesHistory(): React.ReactElement {
         <div
           style={{
             border: '1px solid var(--border)',
-            borderRadius: 10,
+            borderRadius: 5,
             overflow: 'hidden',
             background: 'var(--surface-3)'
           }}
@@ -328,11 +443,11 @@ export function SalesHistory(): React.ReactElement {
                   borderBottom: '1px solid var(--border-soft)'
                 }}
               >
-                <div>{i.product_name}</div>
-                <div>
+                <div style={{ fontWeight: 600 }}>{i.product_name}</div>
+                <div style={{ color: '#e5e7eb' }}>
                   {i.quantity} x {(i.unit_price_cents / 100).toLocaleString('uz-UZ')} so'm
                 </div>
-                <div style={{ color: 'var(--accent)', fontWeight: 700 }}>
+                <div style={{ color: 'var(--accent)', fontWeight: 800 }}>
                   {(i.line_total_cents / 100).toLocaleString('uz-UZ')} so'm
                 </div>
               </div>
