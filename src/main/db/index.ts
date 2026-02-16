@@ -38,6 +38,16 @@ CREATE TABLE IF NOT EXISTS customers (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS app_users (
+  id INTEGER PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE,
+  role TEXT NOT NULL CHECK (role IN ('Do''kondor','owner')),
+  password_salt TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS sales (
   id INTEGER PRIMARY KEY,
   customer_id INTEGER REFERENCES customers(id),
@@ -87,11 +97,13 @@ CREATE TABLE IF NOT EXISTS stock_movements (
 CREATE TABLE IF NOT EXISTS debts (
   id INTEGER PRIMARY KEY,
   customer_id INTEGER NOT NULL REFERENCES customers(id),
+  sale_id INTEGER REFERENCES sales(id),
   description TEXT NOT NULL,
   total_cents INTEGER NOT NULL,
   paid_cents INTEGER NOT NULL DEFAULT 0,
   due_date DATE,
   is_paid INTEGER NOT NULL DEFAULT 0,
+  paid_at DATETIME,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -137,6 +149,11 @@ CREATE TRIGGER IF NOT EXISTS trg_customers_updated AFTER UPDATE ON customers
 BEGIN
   UPDATE customers SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;
+
+CREATE TRIGGER IF NOT EXISTS trg_app_users_updated AFTER UPDATE ON app_users
+BEGIN
+  UPDATE app_users SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
 `
 
 export function initializeDatabase(): Database.Database {
@@ -154,6 +171,7 @@ export function initializeDatabase(): Database.Database {
   db.exec(TABLE_SQL)
   // 2) Migrate legacy columns (old products without barcode, etc.)
   migrateLegacyProducts(db)
+  migrateLegacyDebtColumns(db)
   // 3) Indexes/triggers after columns exist
   db.exec(INDEXES_AND_TRIGGERS)
 
@@ -216,4 +234,26 @@ function migrateLegacyProducts(database: Database.Database) {
   } catch (err) {
     console.warn('Price migration skipped:', err)
   }
+}
+
+function migrateLegacyDebtColumns(database: Database.Database) {
+  const addCol = (table: string, name: string, type: string) => {
+    const cols = database.prepare(`PRAGMA table_info(${table})`).all()
+    const exists = cols.some((c: any) => c.name === name)
+    if (!exists) {
+      database.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`)
+    }
+  }
+
+  addCol('debts', 'sale_id', 'INTEGER REFERENCES sales(id)')
+  addCol('debts', 'paid_at', 'DATETIME')
+
+  // Backfill sale_id for legacy rows created from debt sales like "Sotuv #123"
+  database.exec(`
+    UPDATE debts
+    SET sale_id = CAST(SUBSTR(description, INSTR(description, '#') + 1) AS INTEGER)
+    WHERE sale_id IS NULL
+      AND description LIKE 'Sotuv #%'
+      AND INSTR(description, '#') > 0;
+  `)
 }

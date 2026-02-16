@@ -12,6 +12,94 @@ export interface Product {
   unit?: string
 }
 
+export interface DebtItem {
+  productName: string
+  unitPriceCents: number
+  quantity: number
+  lineTotalCents: number
+}
+
+export interface DebtRecord {
+  id: number
+  customerId: number
+  customerName: string
+  saleId?: number
+  description: string
+  debtDate: string
+  paymentDate?: string
+  status: 'paid' | 'unpaid'
+  totalCents: number
+  paidCents: number
+  remainingCents: number
+  items: DebtItem[]
+}
+
+export interface AnalyticsPaymentRow {
+  method: string
+  salesCount: number
+  totalCents: number
+}
+
+export interface AnalyticsDailyRow {
+  day: string
+  salesCount: number
+  totalCents: number
+}
+
+export interface AnalyticsTopProductRow {
+  productId: number
+  productName: string
+  qty: number
+  revenueCents: number
+  avgPriceCents: number
+}
+
+export interface AnalyticsInventoryRow {
+  productId: number
+  barcode: string
+  name: string
+  unit: string
+  stock: number
+  minStock: number
+  priceCents: number
+  stockValueCents: number
+  soldQty: number
+  soldCents: number
+}
+
+export interface AnalyticsReport {
+  period: { from?: string; to?: string }
+  summary: {
+    salesCount: number
+    totalCents: number
+    discountCents: number
+    debtCents: number
+    avgCheckCents: number
+  }
+  previousSummary: null | {
+    salesCount: number
+    totalCents: number
+    discountCents: number
+    debtCents: number
+    avgCheckCents: number
+  }
+  comparison: null | {
+    totalPct: number | null
+    salesCountPct: number | null
+    avgCheckPct: number | null
+  }
+  payments: AnalyticsPaymentRow[]
+  daily: AnalyticsDailyRow[]
+  topProducts: AnalyticsTopProductRow[]
+  inventory: AnalyticsInventoryRow[]
+}
+
+export interface AuthStatus {
+  hasOwner: boolean
+  authenticated: boolean
+  username: string | null
+}
+
 // 2. Define the API object with explicit types
 const api = {
   printBarcode: (sku: string, name: string): void => {
@@ -79,12 +167,40 @@ const api = {
     return ipcRenderer.invoke('get-sales')
   },
 
+  getSalesAll: () => {
+    return ipcRenderer.invoke('get-sales-all')
+  },
+
   getSaleItems: (saleId: number) => {
     return ipcRenderer.invoke('get-sale-items', saleId)
   },
 
+  clearSalesRecords: (): Promise<boolean> => {
+    return ipcRenderer.invoke('clear-sales-records')
+  },
+
+  getAnalyticsReport: (filter?: { from?: string; to?: string }): Promise<AnalyticsReport> => {
+    return ipcRenderer.invoke('get-analytics-report', filter)
+  },
+
   payDebt: (customerId: number, amountCents: number) => {
     return ipcRenderer.invoke('pay-debt', customerId, amountCents)
+  },
+
+  getDebts: (): Promise<DebtRecord[]> => {
+    return ipcRenderer.invoke('get-debts')
+  },
+
+  payDebtRecord: (debtId: number, amountCents: number): Promise<{ success: boolean; appliedCents: number; fullyPaid: boolean }> => {
+    return ipcRenderer.invoke('pay-debt-record', debtId, amountCents)
+  },
+
+  deleteDebtRecord: (debtId: number): Promise<boolean> => {
+    return ipcRenderer.invoke('delete-debt-record', debtId)
+  },
+
+  clearDebtsRecords: (): Promise<boolean> => {
+    return ipcRenderer.invoke('clear-debts-records')
   },
 
   exportSalesExcel: (payload: {
@@ -94,6 +210,26 @@ const api = {
     sheetName?: string
   }) => {
     return ipcRenderer.invoke('export-sales-excel', payload)
+  },
+
+  getAuthStatus: (): Promise<AuthStatus> => {
+    return ipcRenderer.invoke('auth-status')
+  },
+
+  setupOwner: (username: string, password: string): Promise<boolean> => {
+    return ipcRenderer.invoke('auth-setup-owner', { username, password })
+  },
+
+  login: (username: string, password: string): Promise<boolean> => {
+    return ipcRenderer.invoke('auth-login', { username, password })
+  },
+
+  logout: (): Promise<boolean> => {
+    return ipcRenderer.invoke('auth-logout')
+  },
+
+  changePassword: (currentPassword: string, newPassword: string): Promise<boolean> => {
+    return ipcRenderer.invoke('auth-change-password', { currentPassword, newPassword })
   }
 }
 

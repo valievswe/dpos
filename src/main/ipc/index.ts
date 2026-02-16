@@ -1,6 +1,7 @@
 import { app, dialog, ipcMain } from 'electron'
 import path from 'path'
 import * as XLSX from 'xlsx'
+import { randomBytes, scryptSync, timingSafeEqual } from 'crypto'
 import { getDB } from '../db'
 import { PrinterService } from '../services/printers'
 import { mapProductRow } from '../db'
@@ -8,6 +9,7 @@ import { mapProductRow } from '../db'
 const allowedUnits = new Set(['dona', 'qadoq', 'litr', 'metr'])
 const TASHKENT_SALE_DATE_SQL = "strftime('%Y-%m-%dT%H:%M:%S+05:00', 'now', '+5 hours')"
 const BARCODE_MAX_TRIES = 20
+let authSessionUserId: number | null = null
 
 const generateEAN8FromId = (id: number): string => {
   const padded = id.toString().padStart(7, '0')
@@ -51,10 +53,148 @@ const ensureMissingBarcodes = (db: any) => {
   })
 }
 
+const isValidYmd = (value?: string): value is string => {
+  if (!value) return false
+  return /^\d{4}-\d{2}-\d{2}$/.test(value)
+}
+
+const addDays = (ymd: string, days: number): string => {
+  const date = new Date(`${ymd}T00:00:00Z`)
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
+const diffDaysInclusive = (from: string, to: string): number => {
+  const start = new Date(`${from}T00:00:00Z`).getTime()
+  const end = new Date(`${to}T00:00:00Z`).getTime()
+  return Math.max(1, Math.floor((end - start) / (24 * 60 * 60 * 1000)) + 1)
+}
+
+const hashPassword = (password: string, saltHex?: string): { saltHex: string; hashHex: string } => {
+  const salt = saltHex ? Buffer.from(saltHex, 'hex') : randomBytes(16)
+  const hash = scryptSync(password, salt, 64)
+  return { saltHex: salt.toString('hex'), hashHex: hash.toString('hex') }
+}
+
+const verifyPassword = (password: string, saltHex: string, expectedHashHex: string): boolean => {
+  const salt = Buffer.from(saltHex, 'hex')
+  const computed = scryptSync(password, salt, 64)
+  const expected = Buffer.from(expectedHashHex, 'hex')
+  if (computed.length !== expected.length) return false
+  return timingSafeEqual(computed, expected)
+}
+
 export function registerIpcHandlers(): void {
   const db = getDB()
 
+  // Normalize legacy role value for existing installs.
+  db.prepare("UPDATE app_users SET role = 'Do''kondor' WHERE role = 'owner'").run()
+
+  const getOwner = () => {
+    return db
+      .prepare(
+        `SELECT id, username, role, password_salt, password_hash
+         FROM app_users
+         WHERE role IN ('Do''kondor','owner')
+         LIMIT 1`
+      )
+      .get() as
+      | { id: number; username: string; role: "Do'kondor" | 'owner'; password_salt: string; password_hash: string }
+      | undefined
+  }
+
   // --- DATABASE HANDLERS ---
+
+  ipcMain.handle('auth-status', () => {
+    const owner = getOwner()
+    return {
+      hasOwner: !!owner,
+      authenticated: !!owner && authSessionUserId === owner.id,
+      username: owner?.username ?? null
+    }
+  })
+
+  ipcMain.handle('auth-setup-owner', (_event, payload: { username: string; password: string }) => {
+    const owner = getOwner()
+    if (owner) throw new Error("Do'kondor foydalanuvchi allaqachon yaratilgan")
+
+    const username = (payload?.username ?? '').trim()
+    const password = payload?.password ?? ''
+    if (username.length < 3) throw new Error('Login kamida 3 belgidan iborat bo\'lsin')
+    if (password.length < 4) throw new Error('Parol kamida 4 belgidan iborat bo\'lsin')
+
+    const { saltHex, hashHex } = hashPassword(password)
+    const result = db
+      .prepare(
+        `INSERT INTO app_users (username, role, password_salt, password_hash)
+         VALUES (?, 'Do''kondor', ?, ?)`
+      )
+      .run(username, saltHex, hashHex)
+    authSessionUserId = Number(result.lastInsertRowid)
+    return true
+  })
+
+  ipcMain.handle('auth-login', (_event, payload: { username: string; password: string }) => {
+    const username = (payload?.username ?? '').trim()
+    const password = payload?.password ?? ''
+    if (!username || !password) throw new Error('Login va parolni kiriting')
+
+    const user = db
+      .prepare(
+        `SELECT id, username, password_salt, password_hash
+         FROM app_users
+         WHERE role IN ('Do''kondor','owner') AND username = ?
+         LIMIT 1`
+      )
+      .get(username) as
+      | { id: number; username: string; password_salt: string; password_hash: string }
+      | undefined
+    if (!user) throw new Error('Login yoki parol noto\'g\'ri')
+
+    const ok = verifyPassword(password, user.password_salt, user.password_hash)
+    if (!ok) throw new Error('Login yoki parol noto\'g\'ri')
+
+    authSessionUserId = user.id
+    return true
+  })
+
+  ipcMain.handle('auth-logout', () => {
+    authSessionUserId = null
+    return true
+  })
+
+  ipcMain.handle(
+    'auth-change-password',
+    (_event, payload: { currentPassword: string; newPassword: string }) => {
+      if (!authSessionUserId) throw new Error('Avval tizimga kiring')
+      const currentPassword = payload?.currentPassword ?? ''
+      const newPassword = payload?.newPassword ?? ''
+      if (newPassword.length < 4) throw new Error('Yangi parol kamida 4 belgidan iborat bo\'lsin')
+
+      const user = db
+        .prepare(
+          `SELECT id, password_salt, password_hash
+           FROM app_users
+           WHERE id = ? AND role IN ('Do''kondor','owner')
+           LIMIT 1`
+        )
+        .get(authSessionUserId) as
+        | { id: number; password_salt: string; password_hash: string }
+        | undefined
+      if (!user) throw new Error("Do'kondor foydalanuvchi topilmadi")
+
+      const ok = verifyPassword(currentPassword, user.password_salt, user.password_hash)
+      if (!ok) throw new Error('Joriy parol noto\'g\'ri')
+
+      const { saltHex, hashHex } = hashPassword(newPassword)
+      db.prepare('UPDATE app_users SET password_salt = ?, password_hash = ? WHERE id = ?').run(
+        saltHex,
+        hashHex,
+        user.id
+      )
+      return true
+    }
+  )
 
   ipcMain.handle('get-products', () => {
     ensureMissingBarcodes(db)
@@ -254,9 +394,9 @@ export function registerIpcHandlers(): void {
             customerId
           )
           db.prepare(
-            `INSERT INTO debts (customer_id, description, total_cents, paid_cents, is_paid)
-             VALUES (?, ?, ?, 0, 0)`
-          ).run(customerId, `Sotuv #${saleId}`, total)
+            `INSERT INTO debts (customer_id, sale_id, description, total_cents, paid_cents, is_paid, paid_at)
+             VALUES (?, ?, ?, ?, 0, 0, NULL)`
+          ).run(customerId, saleId, `Sotuv #${saleId}`, total)
         } else {
           db.prepare(
             `INSERT INTO payments (sale_id, method, amount_cents) VALUES (?, ?, ?)`
@@ -273,7 +413,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('get-sales', () => {
     const rows = db
       .prepare(
-        `SELECT s.id, s.sale_date, s.total_cents, s.payment_method, c.name as customer_name
+        `SELECT s.id, s.sale_date, s.total_cents, s.payment_method, c.name as customer_name, c.phone as customer_phone
          FROM sales s
          LEFT JOIN customers c ON c.id = s.customer_id
          ORDER BY datetime(s.sale_date) DESC
@@ -282,6 +422,236 @@ export function registerIpcHandlers(): void {
       .all()
     return rows
   })
+
+  ipcMain.handle('get-sales-all', () => {
+    const rows = db
+      .prepare(
+        `SELECT s.id, s.sale_date, s.total_cents, s.payment_method, c.name as customer_name, c.phone as customer_phone
+         FROM sales s
+         LEFT JOIN customers c ON c.id = s.customer_id
+         ORDER BY datetime(s.sale_date) DESC`
+      )
+      .all()
+    return rows
+  })
+
+  ipcMain.handle(
+    'get-analytics-report',
+    (
+      _event,
+      filter?: {
+        from?: string
+        to?: string
+      }
+    ) => {
+      const from = isValidYmd(filter?.from) ? filter?.from : undefined
+      const to = isValidYmd(filter?.to) ? filter?.to : undefined
+      const hasRange = !!(from && to)
+
+      const named: Record<string, string> = {}
+      const salesWhere: string[] = []
+      if (from) {
+        named.from = from
+        salesWhere.push('date(s.sale_date) >= date(@from)')
+      }
+      if (to) {
+        named.to = to
+        salesWhere.push('date(s.sale_date) <= date(@to)')
+      }
+      const salesWhereSql = salesWhere.length > 0 ? `WHERE ${salesWhere.join(' AND ')}` : ''
+
+      const summary = db
+        .prepare(
+          `SELECT
+             COUNT(*) AS sales_count,
+             COALESCE(SUM(s.total_cents), 0) AS total_cents,
+             COALESCE(SUM(s.discount_cents), 0) AS discount_cents,
+             COALESCE(SUM(CASE WHEN s.payment_method = 'debt' THEN s.total_cents ELSE 0 END), 0) AS debt_cents
+           FROM sales s
+           ${salesWhereSql}`
+        )
+        .get(named) as {
+        sales_count: number
+        total_cents: number
+        discount_cents: number
+        debt_cents: number
+      }
+
+      const payments = db
+        .prepare(
+          `SELECT
+             s.payment_method AS method,
+             COUNT(*) AS sales_count,
+             COALESCE(SUM(s.total_cents), 0) AS total_cents
+           FROM sales s
+           ${salesWhereSql}
+           GROUP BY s.payment_method
+           ORDER BY total_cents DESC`
+        )
+        .all(named)
+
+      const daily = db
+        .prepare(
+          `SELECT
+             date(s.sale_date) AS day,
+             COUNT(*) AS sales_count,
+             COALESCE(SUM(s.total_cents), 0) AS total_cents
+           FROM sales s
+           ${salesWhereSql}
+           GROUP BY date(s.sale_date)
+           ORDER BY day ASC`
+        )
+        .all(named)
+
+      const topProducts = db
+        .prepare(
+          `SELECT
+             si.product_id AS product_id,
+             si.product_name AS product_name,
+             COALESCE(SUM(si.quantity), 0) AS qty,
+             COALESCE(SUM(si.line_total_cents), 0) AS revenue_cents
+           FROM sale_items si
+           JOIN sales s ON s.id = si.sale_id
+           ${salesWhereSql}
+           GROUP BY si.product_id, si.product_name
+           ORDER BY revenue_cents DESC
+           LIMIT 10`
+        )
+        .all(named)
+
+      const inventoryWhere = salesWhere
+        .map((clause) => clause.replace(/s\./g, 's2.'))
+        .join(' AND ')
+      const inventoryWhereSql = inventoryWhere ? `AND ${inventoryWhere}` : ''
+      const inventory = db
+        .prepare(
+          `SELECT
+             p.id AS product_id,
+             p.barcode,
+             p.name,
+             p.unit,
+             p.qty AS stock,
+             p.min_stock,
+             p.price_cents,
+             COALESCE((
+               SELECT SUM(si.quantity)
+               FROM sale_items si
+               JOIN sales s2 ON s2.id = si.sale_id
+               WHERE si.product_id = p.id
+               ${inventoryWhereSql}
+             ), 0) AS sold_qty,
+             COALESCE((
+               SELECT SUM(si.line_total_cents)
+               FROM sale_items si
+               JOIN sales s2 ON s2.id = si.sale_id
+               WHERE si.product_id = p.id
+               ${inventoryWhereSql}
+             ), 0) AS sold_cents
+           FROM products p
+           WHERE p.active = 1
+           ORDER BY p.name ASC`
+        )
+        .all(named)
+
+      let previousSummary: null | {
+        sales_count: number
+        total_cents: number
+        discount_cents: number
+        debt_cents: number
+      } = null
+
+      if (hasRange && from && to) {
+        const len = diffDaysInclusive(from, to)
+        const prevTo = addDays(from, -1)
+        const prevFrom = addDays(prevTo, -(len - 1))
+
+        previousSummary = db
+          .prepare(
+            `SELECT
+               COUNT(*) AS sales_count,
+               COALESCE(SUM(s.total_cents), 0) AS total_cents,
+               COALESCE(SUM(s.discount_cents), 0) AS discount_cents,
+               COALESCE(SUM(CASE WHEN s.payment_method = 'debt' THEN s.total_cents ELSE 0 END), 0) AS debt_cents
+             FROM sales s
+             WHERE date(s.sale_date) >= date(@prevFrom)
+               AND date(s.sale_date) <= date(@prevTo)`
+          )
+          .get({ prevFrom, prevTo }) as {
+          sales_count: number
+          total_cents: number
+          discount_cents: number
+          debt_cents: number
+        }
+      }
+
+      const currentAvg = summary.sales_count > 0 ? Math.round(summary.total_cents / summary.sales_count) : 0
+      const previousAvg =
+        previousSummary && previousSummary.sales_count > 0
+          ? Math.round(previousSummary.total_cents / previousSummary.sales_count)
+          : 0
+
+      const pct = (current: number, previous: number): number | null => {
+        if (previous === 0) return current === 0 ? 0 : null
+        return Number((((current - previous) / previous) * 100).toFixed(2))
+      }
+
+      return {
+        period: { from, to },
+        summary: {
+          salesCount: Number(summary.sales_count ?? 0),
+          totalCents: Number(summary.total_cents ?? 0),
+          discountCents: Number(summary.discount_cents ?? 0),
+          debtCents: Number(summary.debt_cents ?? 0),
+          avgCheckCents: currentAvg
+        },
+        previousSummary: previousSummary
+          ? {
+              salesCount: Number(previousSummary.sales_count ?? 0),
+              totalCents: Number(previousSummary.total_cents ?? 0),
+              discountCents: Number(previousSummary.discount_cents ?? 0),
+              debtCents: Number(previousSummary.debt_cents ?? 0),
+              avgCheckCents: previousAvg
+            }
+          : null,
+        comparison: previousSummary
+          ? {
+              totalPct: pct(Number(summary.total_cents ?? 0), Number(previousSummary.total_cents ?? 0)),
+              salesCountPct: pct(Number(summary.sales_count ?? 0), Number(previousSummary.sales_count ?? 0)),
+              avgCheckPct: pct(currentAvg, previousAvg)
+            }
+          : null,
+        payments: payments.map((p: any) => ({
+          method: String(p.method),
+          salesCount: Number(p.sales_count ?? 0),
+          totalCents: Number(p.total_cents ?? 0)
+        })),
+        daily: daily.map((d: any) => ({
+          day: String(d.day),
+          salesCount: Number(d.sales_count ?? 0),
+          totalCents: Number(d.total_cents ?? 0)
+        })),
+        topProducts: topProducts.map((r: any) => ({
+          productId: Number(r.product_id),
+          productName: String(r.product_name),
+          qty: Number(r.qty ?? 0),
+          revenueCents: Number(r.revenue_cents ?? 0),
+          avgPriceCents: Number(r.qty ?? 0) > 0 ? Math.round(Number(r.revenue_cents ?? 0) / Number(r.qty ?? 1)) : 0
+        })),
+        inventory: inventory.map((r: any) => ({
+          productId: Number(r.product_id),
+          barcode: r.barcode ? String(r.barcode) : '',
+          name: String(r.name),
+          unit: r.unit ? String(r.unit) : '',
+          stock: Number(r.stock ?? 0),
+          minStock: Number(r.min_stock ?? 0),
+          priceCents: Number(r.price_cents ?? 0),
+          stockValueCents: Math.round(Number(r.stock ?? 0) * Number(r.price_cents ?? 0)),
+          soldQty: Number(r.sold_qty ?? 0),
+          soldCents: Number(r.sold_cents ?? 0)
+        }))
+      }
+    }
+  )
 
   ipcMain.handle('get-sale-items', (_event, saleId: number) => {
     return db
@@ -294,23 +664,280 @@ export function registerIpcHandlers(): void {
       .all(saleId)
   })
 
+  ipcMain.handle('clear-sales-records', () => {
+    const t = db.transaction(() => {
+      db.prepare('DELETE FROM debt_transactions WHERE sale_id IS NOT NULL').run()
+      db.prepare('DELETE FROM debts WHERE sale_id IS NOT NULL').run()
+      db.prepare('DELETE FROM sales').run()
+
+      db.prepare(
+        `UPDATE customers
+         SET debt_cents = COALESCE((
+           SELECT SUM(MAX(d.total_cents - d.paid_cents, 0))
+           FROM debts d
+           WHERE d.customer_id = customers.id
+             AND d.is_paid = 0
+         ), 0)`
+      ).run()
+
+      return true
+    })
+
+    return t()
+  })
+
   ipcMain.handle('pay-debt', (_event, customerId: number, amountCents: number) => {
     const t = db.transaction(() => {
+      const safeAmount = Math.max(0, Math.round(Number(amountCents)))
+      if (safeAmount <= 0) {
+        throw new Error("To'lov summasi noto'g'ri")
+      }
+
+      const openDebts = db
+        .prepare(
+          `SELECT id, total_cents, paid_cents
+           FROM debts
+           WHERE customer_id = ? AND is_paid = 0
+           ORDER BY datetime(created_at) ASC, id ASC`
+        )
+        .all(customerId) as { id: number; total_cents: number; paid_cents: number }[]
+
+      let remaining = safeAmount
+      let appliedTotal = 0
+      for (const debt of openDebts) {
+        if (remaining <= 0) break
+        const outstanding = Math.max(0, debt.total_cents - debt.paid_cents)
+        if (outstanding <= 0) continue
+        const applied = Math.min(outstanding, remaining)
+        db.prepare(
+          `UPDATE debts
+           SET paid_cents = paid_cents + ?,
+               is_paid = CASE WHEN paid_cents + ? >= total_cents THEN 1 ELSE 0 END,
+               paid_at = CASE
+                 WHEN paid_cents + ? >= total_cents THEN CURRENT_TIMESTAMP
+                 ELSE paid_at
+               END
+           WHERE id = ?`
+        ).run(applied, applied, applied, debt.id)
+        remaining -= applied
+        appliedTotal += applied
+      }
+
+      if (appliedTotal <= 0) {
+        throw new Error('Mijoz uchun ochiq qarz topilmadi')
+      }
+
       db.prepare(
         `INSERT INTO debt_transactions (customer_id, type, amount_cents, note)
          VALUES (?, 'payment', ?, 'To''lov')`
-      ).run(customerId, amountCents)
+      ).run(customerId, appliedTotal)
       db.prepare('UPDATE customers SET debt_cents = MAX(debt_cents - ?, 0) WHERE id = ?').run(
-        amountCents,
+        appliedTotal,
         customerId
       )
-      db.prepare(
-        `UPDATE debts SET paid_cents = MIN(total_cents, paid_cents + ?),
-                          is_paid = CASE WHEN paid_cents + ? >= total_cents THEN 1 ELSE 0 END
-         WHERE customer_id = ? AND is_paid = 0`
-      ).run(amountCents, amountCents, customerId)
       return true
     })
+    return t()
+  })
+
+  ipcMain.handle('get-debts', () => {
+    const rows = db
+      .prepare(
+        `SELECT
+           d.id AS debt_id,
+           d.customer_id,
+           c.name AS customer_name,
+           d.sale_id,
+           d.description,
+           d.total_cents,
+           d.paid_cents,
+           d.is_paid,
+           d.created_at AS debt_date,
+           d.paid_at,
+           si.product_name,
+           si.unit_price_cents,
+           si.quantity,
+           si.line_total_cents,
+           (
+             SELECT MAX(dt.created_at)
+             FROM debt_transactions dt
+             WHERE dt.type = 'payment'
+               AND dt.customer_id = d.customer_id
+               AND (
+                 (d.sale_id IS NOT NULL AND dt.sale_id = d.sale_id)
+                 OR (d.sale_id IS NULL AND dt.note LIKE '%' || d.id || '%')
+               )
+           ) AS last_payment_at
+         FROM debts d
+         LEFT JOIN customers c ON c.id = d.customer_id
+         LEFT JOIN sale_items si ON si.sale_id = d.sale_id
+         ORDER BY datetime(d.created_at) DESC, d.id DESC, si.id ASC`
+      )
+      .all() as any[]
+
+    const grouped = new Map<
+      number,
+      {
+        id: number
+        customerId: number
+        customerName: string
+        saleId?: number
+        description: string
+        debtDate: string
+        paymentDate?: string
+        status: 'paid' | 'unpaid'
+        totalCents: number
+        paidCents: number
+        remainingCents: number
+        items: {
+          productName: string
+          unitPriceCents: number
+          quantity: number
+          lineTotalCents: number
+        }[]
+      }
+    >()
+
+    for (const row of rows) {
+      const id = Number(row.debt_id)
+      if (!grouped.has(id)) {
+        const totalCents = Number(row.total_cents ?? 0)
+        const paidCents = Number(row.paid_cents ?? 0)
+        grouped.set(id, {
+          id,
+          customerId: Number(row.customer_id),
+          customerName: row.customer_name ?? '-',
+          saleId: row.sale_id ?? undefined,
+          description: row.description ?? '',
+          debtDate: row.debt_date,
+          paymentDate: row.paid_at ?? row.last_payment_at ?? undefined,
+          status: Number(row.is_paid) === 1 ? 'paid' : 'unpaid',
+          totalCents,
+          paidCents,
+          remainingCents: Math.max(0, totalCents - paidCents),
+          items: []
+        })
+      }
+
+      if (row.product_name) {
+        grouped.get(id)!.items.push({
+          productName: row.product_name,
+          unitPriceCents: Number(row.unit_price_cents ?? 0),
+          quantity: Number(row.quantity ?? 0),
+          lineTotalCents: Number(row.line_total_cents ?? 0)
+        })
+      }
+    }
+
+    return Array.from(grouped.values())
+  })
+
+  ipcMain.handle('pay-debt-record', (_event, debtId: number, amountCents: number) => {
+    const t = db.transaction(() => {
+      const debt = db
+        .prepare(
+          `SELECT id, customer_id, sale_id, total_cents, paid_cents, is_paid
+           FROM debts
+           WHERE id = ?`
+        )
+        .get(debtId) as
+        | {
+            id: number
+            customer_id: number
+            sale_id?: number | null
+            total_cents: number
+            paid_cents: number
+            is_paid: number
+          }
+        | undefined
+
+      if (!debt) throw new Error('Qarz yozuvi topilmadi')
+      if (debt.is_paid === 1) throw new Error("Qarz allaqachon to'langan")
+
+      const safeAmount = Math.max(0, Math.round(Number(amountCents)))
+      if (!safeAmount) throw new Error("To'lov summasi noto'g'ri")
+
+      const outstanding = Math.max(0, debt.total_cents - debt.paid_cents)
+      if (outstanding <= 0) throw new Error("Qarz qoldig'i yo'q")
+      const applied = Math.min(safeAmount, outstanding)
+
+      db.prepare(
+        `INSERT INTO debt_transactions (customer_id, sale_id, type, amount_cents, note)
+         VALUES (?, ?, 'payment', ?, ?)`
+      ).run(debt.customer_id, debt.sale_id ?? null, applied, `Qarz #${debt.id} to'lov`)
+
+      db.prepare(
+        `UPDATE debts
+         SET paid_cents = paid_cents + ?,
+             is_paid = CASE WHEN paid_cents + ? >= total_cents THEN 1 ELSE 0 END,
+             paid_at = CASE
+               WHEN paid_cents + ? >= total_cents THEN CURRENT_TIMESTAMP
+               ELSE paid_at
+             END
+         WHERE id = ?`
+      ).run(applied, applied, applied, debt.id)
+
+      db.prepare('UPDATE customers SET debt_cents = MAX(debt_cents - ?, 0) WHERE id = ?').run(
+        applied,
+        debt.customer_id
+      )
+
+      return { success: true, appliedCents: applied, fullyPaid: applied >= outstanding }
+    })
+
+    return t()
+  })
+
+  ipcMain.handle('delete-debt-record', (_event, debtId: number) => {
+    const t = db.transaction(() => {
+      const debt = db
+        .prepare(
+          `SELECT id, customer_id, sale_id, total_cents, paid_cents
+           FROM debts
+           WHERE id = ?`
+        )
+        .get(debtId) as
+        | {
+            id: number
+            customer_id: number
+            sale_id?: number | null
+            total_cents: number
+            paid_cents: number
+          }
+        | undefined
+      if (!debt) return false
+
+      const outstanding = Math.max(0, Number(debt.total_cents) - Number(debt.paid_cents))
+      db.prepare('DELETE FROM debts WHERE id = ?').run(debt.id)
+
+      if (debt.sale_id) {
+        db.prepare(
+          `DELETE FROM debt_transactions
+           WHERE type = 'debt_added' AND customer_id = ? AND sale_id = ?`
+        ).run(debt.customer_id, debt.sale_id)
+      }
+
+      if (outstanding > 0) {
+        db.prepare('UPDATE customers SET debt_cents = MAX(debt_cents - ?, 0) WHERE id = ?').run(
+          outstanding,
+          debt.customer_id
+        )
+      }
+
+      return true
+    })
+
+    return t()
+  })
+
+  ipcMain.handle('clear-debts-records', () => {
+    const t = db.transaction(() => {
+      db.prepare('UPDATE customers SET debt_cents = 0 WHERE debt_cents > 0').run()
+      db.prepare('DELETE FROM debts').run()
+      db.prepare('DELETE FROM debt_transactions').run()
+      return true
+    })
+
     return t()
   })
 

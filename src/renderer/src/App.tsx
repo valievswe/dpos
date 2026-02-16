@@ -1,61 +1,96 @@
-import React, { useCallback, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import Sidebar from './components/Sidebar'
 import { ProductManager } from './components/ProductManager'
 import { SalesPage } from './components/SalesPage'
 import { SalesHistory } from './components/SalesHistory'
 import { Debts } from './components/Debts'
+import { AnalysisPage } from './components/AnalysisPage'
+import { OmborReportPage } from './components/OmborReportPage'
+import { AuthGate } from './components/AuthGate'
+import { SecuritySettings } from './components/SecuritySettings'
 
-type SectionId = 'sales' | 'inventory' | 'history' | 'debts'
+type SectionId = 'sales' | 'inventory' | 'history' | 'debts' | 'analysis' | 'warehouse' | 'security'
 
 function App(): React.ReactElement {
+  const [authLoading, setAuthLoading] = useState(true)
+  const [hasOwner, setHasOwner] = useState(false)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [ownerUsername, setOwnerUsername] = useState<string | null>(null)
   const [activeSection, setActiveSection] = useState<SectionId>('sales')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+
   const sections = [
     { id: 'sales', label: 'Sotuv oynasi' },
     { id: 'inventory', label: 'Mahsulotlar' },
     { id: 'history', label: 'Sotuv tarixi' },
-    { id: 'debts', label: 'Qarzlar' }
+    { id: 'debts', label: 'Qarzlar' },
+    { id: 'analysis', label: 'Analitika' },
+    { id: 'warehouse', label: 'Ombor hisobot' },
+    { id: 'security', label: 'Xavfsizlik' }
   ]
+
+  const refreshAuth = useCallback(async () => {
+    setAuthLoading(true)
+    try {
+      const status = await window.api.getAuthStatus()
+      setHasOwner(status.hasOwner)
+      setIsAuthenticated(status.authenticated)
+      setOwnerUsername(status.username)
+    } finally {
+      setAuthLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    refreshAuth()
+  }, [refreshAuth])
 
   const handleNavigate = useCallback((id: string) => {
     setActiveSection(id as SectionId)
   }, [])
 
-  const pageTitle = useMemo(() => {
-    switch (activeSection) {
-      case 'inventory':
-        return 'Mahsulot boshqaruvi'
-      case 'history':
-        return "So'nggi sotuvlar"
-      case 'debts':
-        return 'Qarzlar va to‘lovlar'
-      default:
-        return 'Operativ sotuv'
-    }
-  }, [activeSection])
-
-  const pageSubtitle = useMemo(() => {
-    switch (activeSection) {
-      case 'inventory':
-        return "Mahsulot qo'shish, birliklarni sozlash, qoldiq va barkodlarni boshqarish"
-      case 'history':
-        return 'Cheklarni qayta chiqarish, filtrlash va tafsilotlarni ko‘rish'
-      case 'debts':
-        return "Mijoz qarzlari, to'lovlarni qayd qilish va balanslarni ko‘rish"
-      default:
-        return 'Skanner, qidiruv va mijoz qarzlari bilan tezkor savdo'
-    }
-  }, [activeSection])
-
   const renderView = () => {
     if (activeSection === 'inventory') return <ProductManager />
     if (activeSection === 'history') return <SalesHistory />
     if (activeSection === 'debts') return <Debts />
+    if (activeSection === 'analysis') return <AnalysisPage />
+    if (activeSection === 'warehouse') return <OmborReportPage />
+    if (activeSection === 'security') {
+      return (
+        <SecuritySettings
+          ownerUsername={ownerUsername}
+          onLogout={async () => {
+            await window.api.logout()
+            await refreshAuth()
+          }}
+        />
+      )
+    }
     return <SalesPage />
   }
 
+  if (authLoading) {
+    return (
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'grid',
+          placeItems: 'center',
+          background: 'var(--bg)',
+          color: 'var(--muted)'
+        }}
+      >
+        Yuklanmoqda...
+      </div>
+    )
+  }
+
+  if (!isAuthenticated) {
+    return <AuthGate hasOwner={hasOwner} onAuthenticated={refreshAuth} />
+  }
+
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)' }}>
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: 'var(--bg)' }}>
       <Sidebar
         title="Do'kondor POS"
         sections={sections}
@@ -67,10 +102,14 @@ function App(): React.ReactElement {
       <main
         style={{
           flex: 1,
+          height: '100vh',
           padding: '26px 30px',
           display: 'flex',
           flexDirection: 'column',
-          gap: '18px'
+          gap: '18px',
+          minWidth: 0,
+          overflowX: 'auto',
+          overflowY: 'hidden'
         }}
       >
         <header
@@ -83,9 +122,11 @@ function App(): React.ReactElement {
             borderRadius: '10px',
             boxShadow: 'var(--shadow-sm)'
           }}
-        ></header>
+        />
 
-        <section style={{ flex: 1, minHeight: 0 }}>{renderView()}</section>
+        <section style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', paddingRight: 2 }}>
+          {renderView()}
+        </section>
       </main>
     </div>
   )

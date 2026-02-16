@@ -16,49 +16,27 @@ export function SalesPage(): React.ReactElement {
   const [customerPhone, setCustomerPhone] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [isNarrow, setIsNarrow] = useState(() => window.innerWidth < 1400)
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
   const inputRef = useRef<HTMLInputElement | null>(null)
+
+  const isMobile = viewportWidth < 1024
 
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
 
   useEffect(() => {
-    const handleResize = () => setIsNarrow(window.innerWidth < 1400)
+    const handleResize = () => setViewportWidth(window.innerWidth)
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
-  // Barcode scanners usually send Enter; auto-add when newline appears
+  // Barcode scanners usually send Enter; auto-add when newline appears.
   useEffect(() => {
     if (query.includes('\n') || query.includes('\r')) {
       addByQuery()
     }
   }, [query])
-
-  const addByQuery = async () => {
-    setError(null)
-    const code = query.trim()
-    if (!code) return
-    try {
-      const found = await window.api.findProduct(code)
-      const target = code.toLowerCase()
-      const product =
-        found ||
-        products.find((p) => {
-          return (p.barcode ?? '').toLowerCase() === target
-        })
-      if (!product) {
-        setError('Mahsulot topilmadi')
-        return
-      }
-      addToCart(product)
-      setQuery('')
-      inputRef.current?.focus()
-    } catch (e: any) {
-      setError(`Xato: ${e?.message ?? 'noma'}`)
-    }
-  }
 
   const addToCart = (product: Product) => {
     setCart((prev) => {
@@ -72,6 +50,33 @@ export function SalesPage(): React.ReactElement {
     })
   }
 
+  const addByQuery = async () => {
+    setError(null)
+    const code = query.trim()
+    if (!code) return
+
+    try {
+      const found = await window.api.findProduct(code)
+      const target = code.toLowerCase()
+      const product =
+        found ||
+        products.find((p) => {
+          return (p.barcode ?? '').toLowerCase() === target
+        })
+
+      if (!product) {
+        setError('Mahsulot topilmadi')
+        return
+      }
+
+      addToCart(product)
+      setQuery('')
+      inputRef.current?.focus()
+    } catch (e: any) {
+      setError(`Xato: ${e?.message ?? 'noma'}`)
+    }
+  }
+
   const updateQty = (
     id: number,
     qty: number,
@@ -79,6 +84,7 @@ export function SalesPage(): React.ReactElement {
   ) => {
     const allowZero = opts.allowZero ?? false
     const remove = opts.remove ?? false
+
     setCart((prev) =>
       prev
         .map((c) => {
@@ -96,6 +102,7 @@ export function SalesPage(): React.ReactElement {
     () => cart.reduce((sum, c) => sum + c.product.price * c.qty, 0),
     [cart]
   )
+
   const discountValue = useMemo(() => {
     const num = parseFloat(discount)
     return Number.isFinite(num) && num > 0 ? num : 0
@@ -104,22 +111,30 @@ export function SalesPage(): React.ReactElement {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return products.slice(0, 15)
+
     return products
-      .filter((p) => p.name.toLowerCase().includes(q) || (p.barcode ?? '').toLowerCase().includes(q))
+      .filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          (p.barcode ?? '').toLowerCase().includes(q)
+      )
       .slice(0, 20)
   }, [products, query])
 
   const checkout = async () => {
     setMessage(null)
     setError(null)
+
     if (cart.length === 0) {
       setError("Savat bo'sh")
       return
     }
+
     if (payment === 'debt' && !customerName.trim()) {
       setError('Qarz uchun mijoz ismi talab qilinadi')
       return
     }
+
     try {
       const payload = {
         items: cart.map((c) => ({ productId: c.product.id, qty: c.qty })),
@@ -130,14 +145,17 @@ export function SalesPage(): React.ReactElement {
             ? { name: customerName.trim(), phone: customerPhone.trim() || undefined }
             : undefined
       }
+
       const res = await window.api.createSale(payload)
       const successMsg = `Sotuv #${res.saleId} yakunlandi. Jami ${(res.total_cents / 100).toLocaleString('uz-UZ')} so'm`
+
       if (window.confirm('Chekni chop etamizmi?')) {
         const printRes = await window.api.printReceiptBySale(res.saleId)
         if (!printRes.success) {
           setError(printRes.error ?? 'Chek chiqarilmadi')
         }
       }
+
       cancelSale(true)
       setMessage(successMsg)
     } catch (e: any) {
@@ -160,8 +178,9 @@ export function SalesPage(): React.ReactElement {
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: isNarrow ? '1fr' : '0.75fr 1.25fr',
-        gap: isNarrow ? '12px' : '20px',
+        gridTemplateColumns: isMobile ? '1fr' : '1.08fr 0.92fr',
+        gridTemplateRows: isMobile ? 'auto auto auto' : 'minmax(0, 1fr) auto',
+        gap: isMobile ? '12px' : '16px',
         height: '100%',
         minHeight: 0,
         overflow: 'hidden'
@@ -177,9 +196,9 @@ export function SalesPage(): React.ReactElement {
           display: 'flex',
           flexDirection: 'column',
           minHeight: 0,
-          height: isNarrow ? 'auto' : '75vh',
+          height: isMobile ? 'auto' : '100%',
           overflowX: 'visible',
-          overflowY: isNarrow ? 'visible' : 'hidden'
+          overflowY: isMobile ? 'visible' : 'hidden'
         }}
       >
         <div
@@ -248,8 +267,9 @@ export function SalesPage(): React.ReactElement {
             Yangilash
           </button>
         </div>
+
         <div style={{ color: 'var(--muted)', marginBottom: 12, fontSize: '0.95rem' }}>
-          Skaner Enter yuboradi — bir necha marta skan qilinsa miqdor oshadi. Qidiruv orqali qo'lda ham qo'shing.
+          Skaner Enter yuboradi - bir necha marta skan qilinsa miqdor oshadi. Qidiruv orqali qo'lda ham qo'shing.
         </div>
 
         <div
@@ -259,8 +279,8 @@ export function SalesPage(): React.ReactElement {
             overflow: 'hidden',
             background: 'var(--surface-3)',
             minHeight: 0,
-            flex: isNarrow ? '0 0 auto' : 1,
-            maxHeight: isNarrow ? '60vh' : undefined
+            flex: isMobile ? '0 0 auto' : 1,
+            maxHeight: isMobile ? '60vh' : undefined
           }}
         >
           {filtered.length > 0 ? (
@@ -315,181 +335,185 @@ export function SalesPage(): React.ReactElement {
 
       <div
         style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '12px',
+          border: '1px solid var(--border)',
+          borderRadius: '5px',
+          padding: '12px',
+          background: 'var(--surface-2)',
+          boxShadow: 'var(--shadow-sm)',
           minHeight: 0,
-          height: isNarrow ? 'auto' : '75vh'
+          height: isMobile ? 'auto' : '100%',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column'
         }}
       >
-        <div
-          style={{
-            border: '1px solid var(--border)',
-            borderRadius: '5px',
-            padding: '12px',
-            background: 'var(--surface-2)',
-            boxShadow: 'var(--shadow-sm)',
-            minHeight: 0,
-            flex: 1,
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column'
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ margin: 0, color: '#f9fafb', fontSize: '1.1rem' }}>Savat</h3>
-            <button
-              type="button"
-              onClick={cancelSale}
-              style={{
-                border: '1px solid var(--border)',
-                background: 'rgba(255,255,255,0.04)',
-                color: 'var(--muted)',
-                borderRadius: '5px',
-                padding: '8px 10px',
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ margin: 0, color: '#f9fafb', fontSize: '1.1rem' }}>Savat</h3>
+          <button
+            type="button"
+            onClick={() => cancelSale()}
+            style={{
+              border: '1px solid var(--border)',
+              background: 'rgba(255,255,255,0.04)',
+              color: 'var(--muted)',
+              borderRadius: '5px',
+              padding: '8px 10px',
               cursor: 'pointer',
               fontWeight: 600
             }}
           >
             Tozalash
           </button>
-          </div>
-          <div
-            style={{
-              marginTop: '8px',
-              flex: 1,
-              minHeight: 0,
-              overflowY: 'auto'
-            }}
-          >
-            {cart.length === 0 ? (
-              <div style={{ color: 'var(--muted)', textAlign: 'center', padding: '28px 0' }}>
-                Savat bo'sh. Chap tomondan mahsulot qo'shing.
-              </div>
-            ) : (
-              cart.map((c) => (
-                <div
-                  key={c.product.id}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '1fr auto',
-                    alignItems: 'center',
-                    padding: '12px 0',
-                    borderBottom: '1px solid var(--border-soft)',
-                    gap: '12px'
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: 800, fontSize: '1.5rem' }}>{c.product.name}</div>
-                    <div style={{ fontSize: '1rem', color: 'var(--muted)', fontWeight: 600 }}>
-                      {c.product.price.toLocaleString('uz-UZ')} so'm
-                    </div>
+        </div>
+
+        <div
+          style={{
+            marginTop: '8px',
+            flex: 1,
+            minHeight: 0,
+            overflowY: 'auto',
+            maxHeight: isMobile ? '48vh' : undefined
+          }}
+        >
+          {cart.length === 0 ? (
+            <div style={{ color: 'var(--muted)', textAlign: 'center', padding: '28px 0' }}>
+              Savat bo'sh. Chap tomondan mahsulot qo'shing.
+            </div>
+          ) : (
+            cart.map((c) => (
+              <div
+                key={c.product.id}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr auto',
+                  alignItems: 'center',
+                  padding: '12px 0',
+                  borderBottom: '1px solid var(--border-soft)',
+                  gap: '12px'
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: '1.5rem' }}>{c.product.name}</div>
+                  <div style={{ fontSize: '1rem', color: 'var(--muted)', fontWeight: 600 }}>
+                    {c.product.price.toLocaleString('uz-UZ')} so'm
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <button
-                        type="button"
-                        onClick={() => updateQty(c.product.id, c.qty - 1, { allowZero: false })}
-                        style={{
-                          width: 44,
-                          height: 44,
-                          borderRadius: '5px',
-                          border: '1px solid var(--border)',
-                          background: 'rgba(255,255,255,0.06)',
-                          color: '#f9fafb',
-                          cursor: 'pointer',
-                          fontWeight: 800,
-                          fontSize: '1.5rem'
-                        }}
-                      >
-                        -
-                      </button>
-                      <input
-                        type="number"
-                        min={0}
-                        value={c.qty === 0 ? '' : c.qty}
-                        onChange={(e) =>
-                          updateQty(
-                            c.product.id,
-                            e.target.value === '' ? 0 : Number(e.target.value),
-                            { allowZero: true }
-                          )
-                        }
-                        onBlur={(e) =>
-                          updateQty(
-                            c.product.id,
-                            e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)),
-                            { allowZero: true }
-                          )
-                        }
-                        style={{
-                          width: 110,
-                          textAlign: 'center',
-                          padding: '10px 12px',
-                          border: '1px solid var(--border)',
-                          borderRadius: '5px',
-                          background: 'var(--surface-3)',
-                          fontWeight: 800,
-                          fontSize: '1.5rem',
-                          color: '#f9fafb'
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => updateQty(c.product.id, c.qty + 1, { allowZero: false })}
-                        style={{
-                          width: 44,
-                          height: 44,
-                          borderRadius: '5px',
-                          border: '1px solid var(--border)',
-                          background: 'rgba(34,211,238,0.12)',
-                          color: '#e0f2fe',
-                          cursor: 'pointer',
-                          fontWeight: 800,
-                          fontSize: '1.5rem'
-                        }}
-                      >
-                        +
-                      </button>
-                    </div>
-                    <strong style={{ fontSize: '1.5rem' }}>
-                      {(c.product.price * c.qty).toLocaleString('uz-UZ')} so'm
-                    </strong>
-                      <button
-                        type="button"
-                        onClick={() => updateQty(c.product.id, 0, { remove: true })}
-                        style={{
-                          width: 40,
-                          height: 40,
-                          borderRadius: '5px',
-                          border: '1px solid var(--border)',
-                        background: 'rgba(239,68,68,0.15)',
-                        color: '#fecdd3',
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <button
+                      type="button"
+                      onClick={() => updateQty(c.product.id, c.qty - 1, { allowZero: false })}
+                      style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: '5px',
+                        border: '1px solid var(--border)',
+                        background: 'rgba(255,255,255,0.06)',
+                        color: '#f9fafb',
                         cursor: 'pointer',
                         fontWeight: 800,
                         fontSize: '1.5rem'
                       }}
                     >
-                      ×
+                      -
+                    </button>
+                    <input
+                      type="number"
+                      min={0}
+                      value={c.qty === 0 ? '' : c.qty}
+                      onChange={(e) =>
+                        updateQty(
+                          c.product.id,
+                          e.target.value === '' ? 0 : Number(e.target.value),
+                          { allowZero: true }
+                        )
+                      }
+                      onBlur={(e) =>
+                        updateQty(
+                          c.product.id,
+                          e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)),
+                          { allowZero: true }
+                        )
+                      }
+                      style={{
+                        width: 110,
+                        textAlign: 'center',
+                        padding: '10px 12px',
+                        border: '1px solid var(--border)',
+                        borderRadius: '5px',
+                        background: 'var(--surface-3)',
+                        fontWeight: 800,
+                        fontSize: '1.5rem',
+                        color: '#f9fafb'
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => updateQty(c.product.id, c.qty + 1, { allowZero: false })}
+                      style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: '5px',
+                        border: '1px solid var(--border)',
+                        background: 'rgba(34,211,238,0.12)',
+                        color: '#e0f2fe',
+                        cursor: 'pointer',
+                        fontWeight: 800,
+                        fontSize: '1.5rem'
+                      }}
+                    >
+                      +
                     </button>
                   </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
 
+                  <strong style={{ fontSize: '1.5rem' }}>
+                    {(c.product.price * c.qty).toLocaleString('uz-UZ')} so'm
+                  </strong>
+
+                  <button
+                    type="button"
+                    onClick={() => updateQty(c.product.id, 0, { remove: true })}
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: '5px',
+                      border: '1px solid var(--border)',
+                      background: 'rgba(239,68,68,0.15)',
+                      color: '#fecdd3',
+                      cursor: 'pointer',
+                      fontWeight: 800,
+                      fontSize: '1.5rem'
+                    }}
+                  >
+                    x
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      <div
+        style={{
+          border: '1px solid var(--border)',
+          borderRadius: '5px',
+          padding: '12px',
+          background: 'var(--surface-2)',
+          boxShadow: 'var(--shadow-sm)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '10px',
+          gridColumn: isMobile ? 'auto' : '1 / -1',
+          gridRow: isMobile ? 'auto' : '2'
+        }}
+      >
         <div
           style={{
-            border: '1px solid var(--border)',
-            borderRadius: '5px',
-            padding: '12px',
-            background: 'var(--surface-2)',
-            boxShadow: 'var(--shadow-sm)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '10px',
-            flexShrink: 0
+            display: 'grid',
+            gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+            gap: '12px'
           }}
         >
           <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--muted)' }}>
@@ -508,42 +532,46 @@ export function SalesPage(): React.ReactElement {
             />
           </label>
 
-          <div style={{ display: 'flex', gap: '12px' }}>
-            <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--muted)' }}>
-              To'lov turi
-              <select
-                value={payment}
-                onChange={(e) => setPayment(e.target.value as any)}
-                style={{
-                  padding: '12px',
-                  borderRadius: '5px',
-                  border: '1px solid var(--border)',
-                  background: 'var(--surface-3)',
-                  color: '#f9fafb'
-                }}
-              >
-                <option value="cash">Naqd</option>
-                <option value="card">Karta</option>
-                <option value="debt">Qarz</option>
-              </select>
-            </label>
-            {payment === 'debt' && (
-              <input
-                style={{
-                  flex: 1,
-                  padding: '12px',
-                  borderRadius: '5px',
-                  border: '1px solid var(--border)',
-                  background: 'var(--surface-3)',
-                  color: '#f9fafb'
-                }}
-                placeholder="Mijoz ismi"
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-              />
-            )}
-          </div>
-          {payment === 'debt' && (
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--muted)' }}>
+            To'lov turi
+            <select
+              value={payment}
+              onChange={(e) => setPayment(e.target.value as 'cash' | 'card' | 'debt')}
+              style={{
+                padding: '12px',
+                borderRadius: '5px',
+                border: '1px solid var(--border)',
+                background: 'var(--surface-3)',
+                color: '#f9fafb'
+              }}
+            >
+              <option value="cash">Naqd</option>
+              <option value="card">Karta</option>
+              <option value="debt">Qarz</option>
+            </select>
+          </label>
+        </div>
+
+        {payment === 'debt' && (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+              gap: '12px'
+            }}
+          >
+            <input
+              style={{
+                padding: '12px',
+                borderRadius: '5px',
+                border: '1px solid var(--border)',
+                background: 'var(--surface-3)',
+                color: '#f9fafb'
+              }}
+              placeholder="Mijoz ismi"
+              value={customerName}
+              onChange={(e) => setCustomerName(e.target.value)}
+            />
             <input
               style={{
                 padding: '12px',
@@ -556,61 +584,62 @@ export function SalesPage(): React.ReactElement {
               value={customerPhone}
               onChange={(e) => setCustomerPhone(e.target.value)}
             />
-          )}
+          </div>
+        )}
 
-          <div
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            padding: '12px',
+            background: 'var(--surface-3)',
+            borderRadius: '5px',
+            fontWeight: 750,
+            border: '1px solid var(--border)'
+          }}
+        >
+          <span>Jami</span>
+          <span>{Math.max(total - discountValue, 0).toLocaleString('uz-UZ')} so'm</span>
+        </div>
+
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <button
+            type="button"
+            onClick={() => cancelSale()}
             style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              padding: '12px',
-              background: 'var(--surface-3)',
+              flex: 1,
+              padding: '14px',
+              border: '1px solid var(--border)',
+              background: 'rgba(255,255,255,0.04)',
+              color: '#f9fafb',
               borderRadius: '5px',
-              fontWeight: 750,
-              border: '1px solid var(--border)'
+              cursor: 'pointer',
+              fontWeight: 700
             }}
           >
-            <span>Jami</span>
-            <span>{Math.max(total - discountValue, 0).toLocaleString('uz-UZ')} so'm</span>
-          </div>
-
-          <div style={{ display: 'flex', gap: '12px' }}>
-            <button
-              type="button"
-              onClick={cancelSale}
-              style={{
-                flex: 1,
-                padding: '14px',
-                border: '1px solid var(--border)',
-                background: 'rgba(255,255,255,0.04)',
-                color: '#f9fafb',
-                borderRadius: '5px',
-                cursor: 'pointer',
-                fontWeight: 700
-              }}
-            >
-              Bekor qilish
-            </button>
-            <button
-              type="button"
-              onClick={checkout}
-              style={{
-                flex: 1,
-                padding: '14px',
-                background: 'linear-gradient(135deg, var(--accent), var(--accent-strong))',
-                color: '#0b1224',
-                border: 'none',
-                borderRadius: '5px',
-                fontWeight: 800,
-                cursor: 'pointer',
-                boxShadow: 'var(--shadow-sm)'
-              }}
-            >
-              Sotish
-            </button>
-          </div>
-          {message && <div style={{ color: 'var(--success)' }}>{message}</div>}
-          {(error || loadError) && <div style={{ color: 'var(--danger)' }}>{error ?? loadError}</div>}
+            Bekor qilish
+          </button>
+          <button
+            type="button"
+            onClick={checkout}
+            style={{
+              flex: 1,
+              padding: '14px',
+              background: 'linear-gradient(135deg, var(--accent), var(--accent-strong))',
+              color: '#0b1224',
+              border: 'none',
+              borderRadius: '5px',
+              fontWeight: 800,
+              cursor: 'pointer',
+              boxShadow: 'var(--shadow-sm)'
+            }}
+          >
+            Sotish
+          </button>
         </div>
+
+        {message && <div style={{ color: 'var(--success)' }}>{message}</div>}
+        {(error || loadError) && <div style={{ color: 'var(--danger)' }}>{error ?? loadError}</div>}
       </div>
     </div>
   )

@@ -10,6 +10,7 @@ type SaleRow = {
   total_cents: number
   payment_method: string
   customer_name?: string
+  customer_phone?: string
 }
 
 const TASHKENT_TZ = 'Asia/Tashkent'
@@ -42,6 +43,8 @@ export function SalesHistory(): React.ReactElement {
   const [dateRange, setDateRange] = useState<{ from?: string; to?: string }>({})
   const [page, setPage] = useState(1)
   const [exporting, setExporting] = useState(false)
+  const [clearModalOpen, setClearModalOpen] = useState(false)
+  const [clearing, setClearing] = useState(false)
   const pageSize = 10
   const tzFormatter = useMemo(
     () =>
@@ -105,18 +108,18 @@ export function SalesHistory(): React.ReactElement {
     }
   }
 
-  const exportExcel = async () => {
+  const exportExcel = async (sourceRows: SaleRow[], filePrefix: string) => {
     if (exporting) return
-    if (filteredRows.length === 0) {
+    if (sourceRows.length === 0) {
       setError("Eksport uchun sotuv yo'q")
       return
     }
     setExporting(true)
     setError(null)
     try {
-      const headers = ['ID', 'Mahsulot', 'Barkod', 'Miqdor', 'Birlik', "Jami (so'm)", "To'lov", 'Mijoz', 'Sana']
+      const headers = ['ID', 'Mahsulot', 'Barkod', 'Miqdor', 'Birlik', "Jami (so'm)", "To'lov", 'Mijoz', 'Telefon', 'Sana']
       const saleItems = await Promise.all(
-        filteredRows.map(async (r) => {
+        sourceRows.map(async (r) => {
           const its = await window.api.getSaleItems(r.id)
           return { sale: r, items: its }
         })
@@ -135,12 +138,13 @@ export function SalesHistory(): React.ReactElement {
             Math.round(i.line_total_cents) / 100,
             paymentLabel(sale.payment_method),
             sale.customer_name ?? '',
+            sale.customer_phone ?? '',
             formatSaleDate(sale.sale_date)
           ]
         })
       )
-      rows.push(['Jami', '', '', '', '', totalSalesCents / 100, '', '', ''])
-      const fileName = `sales_items_${tzDateKeyFormatter.format(new Date())}.xlsx`
+      rows.push(['Jami', '', '', '', '', totalSalesCents / 100, '', '', '', ''])
+      const fileName = `${filePrefix}_${tzDateKeyFormatter.format(new Date())}.xlsx`
       const res = await window.api.exportSalesExcel({
         headers,
         rows,
@@ -154,6 +158,28 @@ export function SalesHistory(): React.ReactElement {
       setError('Eksport qilishda xatolik')
     } finally {
       setExporting(false)
+    }
+  }
+
+  const clearSales = async () => {
+    const finalOk = window.confirm(
+      "Barcha sotuv yozuvlarini tozalaysizmi? Bu amalni ortga qaytarib bo'lmaydi."
+    )
+    if (!finalOk) return
+
+    setClearing(true)
+    setError(null)
+    try {
+      await window.api.clearSalesRecords()
+      setClearModalOpen(false)
+      setSelected(null)
+      setSelectedRow(null)
+      setItems([])
+      await load()
+    } catch {
+      setError("Sotuv yozuvlarini tozalashda xatolik")
+    } finally {
+      setClearing(false)
     }
   }
 
@@ -241,8 +267,11 @@ export function SalesHistory(): React.ReactElement {
           <Button variant="ghost" size="sm" onClick={load}>
             Yangilash
           </Button>
-          <Button variant="outline" size="sm" onClick={exportExcel} disabled={exporting}>
+          <Button variant="outline" size="sm" onClick={() => exportExcel(filteredRows, 'sales_items')} disabled={exporting}>
             {exporting ? 'Eksport...' : 'Excel eksport'}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setClearModalOpen(true)} disabled={clearing}>
+            Sotuvlarni tozalash
           </Button>
         </div>
       </div>
@@ -455,6 +484,33 @@ export function SalesHistory(): React.ReactElement {
             {items.length === 0 && (
               <div style={{ padding: 12, color: 'var(--muted)' }}>Tafsilotlar yo'q.</div>
             )}
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={clearModalOpen} onClose={() => setClearModalOpen(false)} title="Sotuvlarni tozalash" width={560}>
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div style={{ color: 'var(--muted)', lineHeight: 1.5 }}>
+            Tozalashdan oldin barcha sotuv yozuvlarini Excelga eksport qilasizmi? Tavsiya: avval eksport qiling, keyin tozalang.
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                const allRows = await window.api.getSalesAll()
+                await exportExcel(allRows, 'sales_all_before_clear')
+              }}
+              disabled={exporting || clearing}
+            >
+              {exporting ? 'Eksport...' : 'Avval eksport qilish'}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={clearSales} disabled={exporting || clearing}>
+              {clearing ? 'Tozalanmoqda...' : 'Eksportsiz tozalash'}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setClearModalOpen(false)} disabled={exporting || clearing}>
+              Bekor qilish
+            </Button>
           </div>
         </div>
       </Modal>

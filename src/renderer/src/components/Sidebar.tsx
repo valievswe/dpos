@@ -28,7 +28,12 @@ const Sidebar: React.FC<SidebarProps> = ({
         flexDirection: 'column',
         padding: collapsed ? '14px 10px' : '20px',
         gap: '18px',
-        minHeight: '100vh',
+        height: '100vh',
+        position: 'sticky',
+        top: 0,
+        flexShrink: 0,
+        overflowY: 'auto',
+        overflowX: 'hidden',
         borderRight: '1px solid var(--border-soft)',
         boxShadow: 'var(--shadow-md)'
       }}
