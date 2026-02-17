@@ -4,6 +4,10 @@ import { execFile } from 'child_process'
 import fs from 'fs'
 import { getDB } from '../db'
 
+const BARCODE_BINARY_CANDIDATES = ['label.exe', 'barcode.exe', 'testbarcode.exe'] as const
+const RECEIPT_BINARY_CANDIDATES = ['receipt2.exe', 'receipt.exe'] as const
+const EAN8_PATTERN = /^\d{8}$/
+
 // Helper to find the correct path in Dev vs Prod
 const getBinaryPath = (binaryName: string): string => {
   if (app.isPackaged) {
@@ -15,24 +19,90 @@ const getBinaryPath = (binaryName: string): string => {
   return path.join(process.cwd(), 'resources', 'bin', binaryName)
 }
 
+const resolveBarcodeBinaryPath = (): { path: string; tried: string[] } => {
+  const tried: string[] = []
+  for (const name of BARCODE_BINARY_CANDIDATES) {
+    const candidate = getBinaryPath(name)
+    tried.push(candidate)
+    if (fs.existsSync(candidate)) {
+      return { path: candidate, tried }
+    }
+  }
+  return { path: tried[0] ?? getBinaryPath(BARCODE_BINARY_CANDIDATES[0]), tried }
+}
+
+const resolveReceiptBinaryPath = (): { path: string; tried: string[] } => {
+  const tried: string[] = []
+  for (const name of RECEIPT_BINARY_CANDIDATES) {
+    const candidate = getBinaryPath(name)
+    tried.push(candidate)
+    if (fs.existsSync(candidate)) {
+      return { path: candidate, tried }
+    }
+  }
+  return { path: tried[0] ?? getBinaryPath(RECEIPT_BINARY_CANDIDATES[0]), tried }
+}
+
+const assertEan8 = (value: string): string => {
+  const clean = `${value ?? ''}`.trim()
+  if (!EAN8_PATTERN.test(clean)) {
+    throw new Error("Barkod 8 raqamdan iborat bo'lishi kerak")
+  }
+  return clean
+}
+
+const sanitizeReceiptField = (value: string): string => {
+  return `${value ?? ''}`.replace(/[;|]/g, ' ').trim()
+}
+
+const formatSom = (cents: number): string => (Math.round(cents) / 100).toFixed(2)
+
+const formatQty = (qty: number): string => {
+  if (!Number.isFinite(qty)) return '0'
+  return Number.isInteger(qty) ? String(qty) : qty.toFixed(2)
+}
+
 export const PrinterService = {
   // Legacy direct barkod chiqarish (job jurnalidan tashqari)
   printLabel: (sku: string, productName: string) => {
-    const exePath = getBinaryPath('testbarcode.exe')
+    const { path: exePath, tried } = resolveBarcodeBinaryPath()
     const printerName = 'label'
-    execFile(exePath, [printerName, sku, productName], (error) => {
+    if (!fs.existsSync(exePath)) {
+      console.error(`Label printer binary not found. Tried: ${tried.join(', ')}`)
+      return
+    }
+    let barcode: string
+    try {
+      barcode = assertEan8(sku)
+    } catch (error) {
+      console.error('Label Printer Error:', error)
+      return
+    }
+    execFile(exePath, [printerName, barcode, productName], (error) => {
       if (error) console.error('Label Printer Error:', error)
     })
   },
 
   // Legacy chek chiqarish (job jurnalidan tashqari)
   printReceipt: (storeName: string, items: any[], total: string) => {
-    const exePath = getBinaryPath('receipt.exe')
+    const { path: exePath, tried } = resolveReceiptBinaryPath()
     const printerName = 'receipt'
     const itemsString = items
-      .map((item) => `${item.name}|${Number(item.price).toFixed(2)}`)
+      .map((item) => {
+        const name = sanitizeReceiptField(item?.name)
+        const unitPrice = Number(item?.price ?? 0)
+        return `${name}|1|${unitPrice.toFixed(2)}|${unitPrice.toFixed(2)}`
+      })
       .join(';')
-    execFile(exePath, [printerName, storeName, itemsString, total], (error) => {
+    const totalValue = Number(total)
+    const subtotal = Number.isFinite(totalValue) ? totalValue.toFixed(2) : '0.00'
+    const discount = '0.00'
+    const paymentType = 'cash'
+    if (!fs.existsSync(exePath)) {
+      console.error(`Receipt printer binary not found. Tried: ${tried.join(', ')}`)
+      return
+    }
+    execFile(exePath, [printerName, storeName, itemsString, subtotal, discount, subtotal, paymentType], (error) => {
       if (error) console.error('Receipt Printer Error:', error)
     })
   },
@@ -48,7 +118,8 @@ export const PrinterService = {
       barcode = ensureBarcode(db, product.id)
     }
 
-    const payload = { printer: printerName, barcode, name: product.name, copies }
+    const safeBarcode = assertEan8(barcode)
+    const payload = { printer: printerName, barcode: safeBarcode, name: product.name, copies }
     const jobId = db
       .prepare(
         `INSERT INTO print_jobs (kind, product_id, copies, status, payload)
@@ -56,9 +127,9 @@ export const PrinterService = {
       )
       .run(productId, copies, JSON.stringify(payload)).lastInsertRowid
 
-    const exePath = getBinaryPath('testbarcode.exe')
+    const { path: exePath, tried } = resolveBarcodeBinaryPath()
     if (!fs.existsSync(exePath)) {
-      throw new Error(`Yorliq printer binari topilmadi: ${exePath}`)
+      throw new Error(`Yorliq printer binari topilmadi. Tekshirildi: ${tried.join(', ')}`)
     }
     const args = [payload.printer, payload.barcode, payload.name]
 
@@ -79,23 +150,35 @@ export const PrinterService = {
   },
 
   // Chek: saleId dan oladi, so‘m formatida
-  async printReceiptBySale(saleId: number, storeName = "Do'kon", printerName = 'receipt') {
+  async printReceiptBySale(saleId: number, storeName = "Do'kondor POS", printerName = 'receipt') {
     const db = getDB()
-    const sale = db.prepare('SELECT id, total_cents FROM sales WHERE id = ?').get(saleId) as any
+    const sale = db
+      .prepare('SELECT id, subtotal_cents, discount_cents, total_cents, payment_method FROM sales WHERE id = ?')
+      .get(saleId) as any
     if (!sale) throw new Error('Sotuv topilmadi')
 
     const items = db
       .prepare(
-        `SELECT product_name as name, quantity, unit_price_cents 
+        `SELECT product_name as name, quantity, unit_price_cents, line_total_cents
          FROM sale_items WHERE sale_id = ?`,
       )
       .all(saleId)
 
-    const formatSom = (cents: number) => (Math.round(cents) / 100).toFixed(2)
-    const itemsString = items.map((i: any) => `${i.name}|${formatSom(i.unit_price_cents)}`).join(';')
-    const total = formatSom(sale.total_cents)
+    const itemsString = items
+      .map((i: any) => {
+        const name = sanitizeReceiptField(i.name)
+        const qty = formatQty(Number(i.quantity ?? 0))
+        const unitPrice = formatSom(Number(i.unit_price_cents ?? 0))
+        const lineTotal = formatSom(Number(i.line_total_cents ?? 0))
+        return `${name}|${qty}|${unitPrice}|${lineTotal}`
+      })
+      .join(';')
+    const subtotal = formatSom(Number(sale.subtotal_cents ?? 0))
+    const discount = formatSom(Number(sale.discount_cents ?? 0))
+    const total = formatSom(Number(sale.total_cents ?? 0))
+    const paymentType = `${sale.payment_method ?? 'cash'}`
 
-    const payload = { printer: printerName, storeName, itemsString, total }
+    const payload = { printer: printerName, storeName, itemsString, subtotal, discount, total, paymentType }
     const jobId = db
       .prepare(
         `INSERT INTO print_jobs (kind, sale_id, status, payload)
@@ -103,8 +186,11 @@ export const PrinterService = {
       )
       .run(saleId, JSON.stringify(payload)).lastInsertRowid
 
-    const exePath = getBinaryPath('receipt.exe')
-    const args = [payload.printer, storeName, itemsString, total]
+    const { path: exePath, tried } = resolveReceiptBinaryPath()
+    if (!fs.existsSync(exePath)) {
+      throw new Error(`Chek printer binari topilmadi. Tekshirildi: ${tried.join(', ')}`)
+    }
+    const args = [payload.printer, storeName, itemsString, subtotal, discount, total, paymentType]
 
     try {
       await runExec(exePath, args)

@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Product, useProducts } from '../hooks/useProducts'
+import { Modal } from './ui/Modal'
+import { Button } from './ui/Button'
 
 type CartLine = {
   product: Product
@@ -18,6 +20,9 @@ export function SalesPage(): React.ReactElement {
   const [error, setError] = useState<string | null>(null)
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const [printPromptOpen, setPrintPromptOpen] = useState(false)
+  const [pendingPrintSaleId, setPendingPrintSaleId] = useState<number | null>(null)
+  const [printing, setPrinting] = useState(false)
 
   const isMobile = viewportWidth < 1024
 
@@ -149,15 +154,10 @@ export function SalesPage(): React.ReactElement {
       const res = await window.api.createSale(payload)
       const successMsg = `Sotuv #${res.saleId} yakunlandi. Jami ${(res.total_cents / 100).toLocaleString('uz-UZ')} so'm`
 
-      if (window.confirm('Chekni chop etamizmi?')) {
-        const printRes = await window.api.printReceiptBySale(res.saleId)
-        if (!printRes.success) {
-          setError(printRes.error ?? 'Chek chiqarilmadi')
-        }
-      }
-
       cancelSale(true)
       setMessage(successMsg)
+      setPendingPrintSaleId(res.saleId)
+      setPrintPromptOpen(true)
     } catch (e: any) {
       setError(`Xato: ${e?.message ?? 'noma'}`)
     }
@@ -172,6 +172,28 @@ export function SalesPage(): React.ReactElement {
     if (!keepMessage) setMessage(null)
     setError(null)
     inputRef.current?.focus()
+  }
+
+  const closePrintPrompt = () => {
+    setPrintPromptOpen(false)
+    setPendingPrintSaleId(null)
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
+  const confirmPrint = async () => {
+    if (!pendingPrintSaleId || printing) return
+    setPrinting(true)
+    try {
+      const printRes = await window.api.printReceiptBySale(pendingPrintSaleId)
+      if (!printRes.success) {
+        setError(printRes.error ?? 'Chek chiqarilmadi')
+      }
+    } catch (e: any) {
+      setError(e?.message ?? 'Chek chiqarilmadi')
+    } finally {
+      setPrinting(false)
+      closePrintPrompt()
+    }
   }
 
   return (
@@ -641,6 +663,20 @@ export function SalesPage(): React.ReactElement {
         {message && <div style={{ color: 'var(--success)' }}>{message}</div>}
         {(error || loadError) && <div style={{ color: 'var(--danger)' }}>{error ?? loadError}</div>}
       </div>
+
+      <Modal open={printPromptOpen} onClose={closePrintPrompt} title="Chek chiqarish">
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div style={{ color: 'var(--muted)' }}>Chekni chop etamizmi?</div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+            <Button variant="ghost" size="sm" onClick={closePrintPrompt} disabled={printing}>
+              Keyinroq
+            </Button>
+            <Button variant="outline" size="sm" onClick={confirmPrint} disabled={printing}>
+              {printing ? 'Chop etilmoqda...' : 'Chop etish'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

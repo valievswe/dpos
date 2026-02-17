@@ -1025,7 +1025,7 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('print-receipt-sale', async (_event, saleId: number, printerName?: string) => {
     try {
-      await PrinterService.printReceiptBySale(Number(saleId), "Do'kon", printerName || 'receipt')
+      await PrinterService.printReceiptBySale(Number(saleId), "Do'kondor POS", printerName || 'receipt')
       return { success: true }
     } catch (err: any) {
       console.error('Receipt print error', err)

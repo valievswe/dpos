@@ -1,7 +1,7 @@
-﻿# Do'kondor API Reference Guide
+# Do'kondor API Reference Guide
 
 > **Renderer Access Point:** `window.api` (exposed via `src/preload/index.ts`)
-> **Last Updated:** 2026-02-15
+> **Last Updated:** 2026-02-16
 
 ---
 
@@ -16,7 +16,7 @@ interface Product {
   stock: number        // stored as REAL in DB (can be fractional)
   barcode?: string
   unit?: string
-  // NOTE: DB also returns min_stock, but it is not typed in preload d.ts
+  min_stock?: number   // returned by main (mapProductRow), not typed in preload d.ts
 }
 
 interface SalePayload {
@@ -32,6 +32,7 @@ interface SaleSummary {
   total_cents: number
   payment_method: string
   customer_name?: string
+  customer_phone?: string
 }
 
 interface SaleItemRow {
@@ -76,6 +77,100 @@ interface ExportSalesExcelResult {
   cancelled?: boolean
   path?: string
 }
+
+interface AuthStatus {
+  hasOwner: boolean
+  authenticated: boolean
+  username: string | null
+}
+
+interface DebtItem {
+  productName: string
+  unitPriceCents: number
+  quantity: number
+  lineTotalCents: number
+}
+
+interface DebtRecord {
+  id: number
+  customerId: number
+  customerName: string
+  saleId?: number
+  description: string
+  debtDate: string
+  paymentDate?: string
+  status: 'paid' | 'unpaid'
+  totalCents: number
+  paidCents: number
+  remainingCents: number
+  items: DebtItem[]
+}
+
+interface PayDebtRecordResult {
+  success: boolean
+  appliedCents: number
+  fullyPaid: boolean
+}
+
+interface AnalyticsPaymentRow {
+  method: string
+  salesCount: number
+  totalCents: number
+}
+
+interface AnalyticsDailyRow {
+  day: string
+  salesCount: number
+  totalCents: number
+}
+
+interface AnalyticsTopProductRow {
+  productId: number
+  productName: string
+  qty: number
+  revenueCents: number
+  avgPriceCents: number
+}
+
+interface AnalyticsInventoryRow {
+  productId: number
+  barcode: string
+  name: string
+  unit: string
+  stock: number
+  minStock: number
+  priceCents: number
+  stockValueCents: number
+  soldQty: number
+  soldCents: number
+}
+
+interface AnalyticsReport {
+  period: { from?: string; to?: string }
+  summary: {
+    salesCount: number
+    totalCents: number
+    discountCents: number
+    debtCents: number
+    avgCheckCents: number
+  }
+  previousSummary: null | {
+    salesCount: number
+    totalCents: number
+    discountCents: number
+    debtCents: number
+    avgCheckCents: number
+  }
+  comparison: null | {
+    totalPct: number | null
+    salesCountPct: number | null
+    avgCheckPct: number | null
+  }
+  payments: AnalyticsPaymentRow[]
+  daily: AnalyticsDailyRow[]
+  topProducts: AnalyticsTopProductRow[]
+  inventory: AnalyticsInventoryRow[]
+}
 ```
 
 ---
@@ -84,21 +179,63 @@ interface ExportSalesExcelResult {
 
 | Method | IPC Channel | Returns | Notes |
 |--------|-------------|---------|-------|
+| `getAuthStatus()` | `auth-status` | `Promise<AuthStatus>` | Session is in-memory; on app restart, user must log in again. |
+| `setupOwner(username, password)` | `auth-setup-owner` | `Promise<boolean>` | One-time owner creation (`app_users`). Throws if owner exists. |
+| `login(username, password)` | `auth-login` | `Promise<boolean>` | Verifies password and sets session. |
+| `logout()` | `auth-logout` | `Promise<boolean>` | Clears in-memory session. |
+| `changePassword(current, next)` | `auth-change-password` | `Promise<boolean>` | Requires active session. |
 | `getProducts()` | `get-products` | `Promise<Product[]>` | Ensures missing barcodes are generated; returns active products sorted by name. |
 | `deleteProduct(productId, force?)` | `delete-product` | `Promise<DeleteProductResult>` | Soft delete with confirmation when history exists. |
 | `addProduct(sku, name, price, unit?, qty?, barcode?)` | `add-product` | `Promise<AddProductResult>` | Auto-generates barcode if missing; may overwrite empty SKU. |
 | `updateProduct(productId, payload)` | `update-product` | `Promise<boolean>` | Updates SKU/name/price/unit/barcode; auto-generates barcode when blank. |
 | `findProduct(code)` | `find-product` | `Promise<Product | null>` | **Barcode-only** lookup (no SKU fallback). |
 | `setStock(productId, qty)` | `set-stock` | `Promise<boolean>` | Logs an `adjustment` in `stock_movements`. |
-| `createSale(payload)` | `create-sale` | `Promise<{ saleId: number; total_cents: number }>` | Full transactional checkout. |
+| `createSale(payload)` | `create-sale` | `Promise<{ saleId: number; total_cents: number }>` | Transactional checkout. See `mixed` caveat below. |
 | `getSales()` | `get-sales` | `Promise<SaleSummary[]>` | Latest 50 sales (Tashkent time ordering). |
+| `getSalesAll()` | `get-sales-all` | `Promise<SaleSummary[]>` | Full sales list (no limit). |
 | `getSaleItems(saleId)` | `get-sale-items` | `Promise<SaleItemRow[]>` | Includes `barcode` + `unit` when available. |
-| `payDebt(customerId, amountCents)` | `pay-debt` | `Promise<boolean>` | Records payment and updates debts. |
+| `clearSalesRecords()` | `clear-sales-records` | `Promise<boolean>` | Deletes sales + sale-linked debts, recalculates customer debt. |
+| `getAnalyticsReport(filter?)` | `get-analytics-report` | `Promise<AnalyticsReport>` | Summary + daily + top products + inventory (period aware). |
+| `payDebt(customerId, amountCents)` | `pay-debt` | `Promise<boolean>` | Applies payment to oldest open debts. |
+| `getDebts()` | `get-debts` | `Promise<DebtRecord[]>` | Aggregated debt rows with items. |
+| `payDebtRecord(debtId, amountCents)` | `pay-debt-record` | `Promise<PayDebtRecordResult>` | Pays a specific debt row. |
+| `deleteDebtRecord(debtId)` | `delete-debt-record` | `Promise<boolean>` | Deletes a single debt entry. |
+| `clearDebtsRecords()` | `clear-debts-records` | `Promise<boolean>` | Clears all debt + debt_transactions rows. |
 | `exportSalesExcel(payload)` | `export-sales-excel` | `Promise<ExportSalesExcelResult>` | Opens save dialog and writes `.xlsx`. |
 | `printBarcode(sku, name)` | `trigger-print` | `void` | Legacy, no job ledger. |
 | `printReceipt(storeName, items, total)` | `trigger-receipt` | `void` | Legacy, no job ledger. |
 | `printBarcodeByProduct(productId, copies?, printerName?)` | `print-barcode-product` | `Promise<boolean>` | Preferred barcode path, writes `print_jobs`. |
 | `printReceiptBySale(saleId, printerName?)` | `print-receipt-sale` | `Promise<{ success: boolean; error?: string }>` | Preferred receipt path. |
+
+---
+
+## Auth APIs
+
+### `window.api.getAuthStatus()`
+- **IPC**: `ipcMain.handle('auth-status')`
+- **Returns**: `{ hasOwner, authenticated, username }`.
+- **Note**: Authentication is stored in memory (`authSessionUserId`); on app restart the user must log in again.
+
+### `window.api.setupOwner(username, password)`
+- **IPC**: `ipcMain.handle('auth-setup-owner')`
+- **Description**: Creates the first (and only) owner row in `app_users` with role `Do'kondor`.
+- **Validation**: `username.length >= 3`, `password.length >= 4`.
+- **Returns**: `true` on success; throws if owner already exists.
+
+### `window.api.login(username, password)`
+- **IPC**: `ipcMain.handle('auth-login')`
+- **Description**: Verifies credentials and sets the in-memory session.
+- **Returns**: `true` on success; throws on invalid credentials.
+
+### `window.api.logout()`
+- **IPC**: `ipcMain.handle('auth-logout')`
+- **Description**: Clears the in-memory session.
+- **Returns**: `true`.
+
+### `window.api.changePassword(currentPassword, newPassword)`
+- **IPC**: `ipcMain.handle('auth-change-password')`
+- **Description**: Updates the owner password (requires active session).
+- **Returns**: `true` on success; throws on invalid current password.
 
 ---
 
@@ -119,7 +256,7 @@ interface ExportSalesExcelResult {
 ### `window.api.addProduct(sku, name, price, unit?, qty?, barcode?)`
 - **IPC**: `ipcMain.handle('add-product')`
 - **Parameters**:
-  - `sku`: Optional; if omitted and barcode is also omitted, a random SKU is generated and later replaced by the auto-barcode.
+  - `sku`: Optional; if omitted, a fallback like `P-<timestamp>-<rand>` is generated.
   - `name`: Product label.
   - `price`: Decimal so'm (renderer sends so'm, main stores cents).
   - `unit` (optional): `'dona' | 'qadoq' | 'litr' | 'metr'`; anything else coerces to `'dona'`.
@@ -170,16 +307,61 @@ interface ExportSalesExcelResult {
 
 ### `window.api.getSales()`
 - **IPC**: `ipcMain.handle('get-sales')`
-- **Description**: Fetches the latest 50 sales joined with optional customer name. Ordered by `datetime(sale_date)`.
+- **Description**: Fetches the latest 50 sales joined with optional customer name + phone. Ordered by `datetime(sale_date)`.
+
+### `window.api.getSalesAll()`
+- **IPC**: `ipcMain.handle('get-sales-all')`
+- **Description**: Fetches the full sales list with customer join. Ordered by `datetime(sale_date)`.
 
 ### `window.api.getSaleItems(saleId)`
 - **IPC**: `ipcMain.handle('get-sale-items')`
 - **Description**: Returns items with `barcode`, `unit`, `quantity`, and pricing data for the specified sale.
 
+### `window.api.clearSalesRecords()`
+- **IPC**: `ipcMain.handle('clear-sales-records')`
+- **Behavior**: Deletes all `sales` rows and any debt rows linked to a sale, then recalculates `customers.debt_cents` from remaining open debts.
+- **Returns**: `true` on success.
+
 ### `window.api.payDebt(customerId, amountCents)`
 - **IPC**: `ipcMain.handle('pay-debt')`
-- **Behavior**: Inserts a `payment` row in `debt_transactions`, decrements `customers.debt_cents`, and updates open `debts` rows to mark paid balances.
+- **Behavior**: Applies the amount to the oldest open debts for the customer, inserts a `debt_transactions` payment, and reduces `customers.debt_cents`.
+- **Returns**: `true` on success; throws if no open debt or amount is invalid.
+
+---
+
+## Debt Record APIs
+
+### `window.api.getDebts()`
+- **IPC**: `ipcMain.handle('get-debts')`
+- **Description**: Returns grouped debt rows with items from `sale_items`. Includes status, totals, and the last payment timestamp.
+
+### `window.api.payDebtRecord(debtId, amountCents)`
+- **IPC**: `ipcMain.handle('pay-debt-record')`
+- **Behavior**: Applies a payment to a single debt row and updates `paid_cents`, `is_paid`, and `paid_at`.
+- **Returns**: `{ success, appliedCents, fullyPaid }`.
+
+### `window.api.deleteDebtRecord(debtId)`
+- **IPC**: `ipcMain.handle('delete-debt-record')`
+- **Behavior**: Deletes the debt row, removes the matching `debt_added` transaction (when sale-linked), and reduces customer debt by the outstanding amount.
+- **Returns**: `true` if deleted.
+
+### `window.api.clearDebtsRecords()`
+- **IPC**: `ipcMain.handle('clear-debts-records')`
+- **Behavior**: Clears all `debts` and `debt_transactions` rows and resets `customers.debt_cents` to 0.
 - **Returns**: `true` on success.
+
+---
+
+## Analytics API
+
+### `window.api.getAnalyticsReport(filter?)`
+- **IPC**: `ipcMain.handle('get-analytics-report')`
+- **Filter**: `{ from?: 'YYYY-MM-DD', to?: 'YYYY-MM-DD' }`. Invalid dates are ignored.
+- **Description**:
+  - Provides period summary + payment split + daily totals + top products + inventory performance.
+  - When both `from` and `to` are set, computes a previous-period comparison of equal length.
+  - Inventory rows include stock, min stock, and sales totals within the selected period.
+- **Returns**: `AnalyticsReport`.
 
 ---
 
@@ -203,10 +385,11 @@ interface ExportSalesExcelResult {
 - **IPC**: `ipcMain.handle('print-barcode-product')`
 - **Description**: Preferred workflow for barcode labels.
   1. Ensures the product has a unique EAN-8 barcode (auto-generates if missing).
-  2. Writes a queued row to `print_jobs` with payload metadata (includes printer name).
-  3. Resolves the correct printer binary path in dev/prod; throws early if missing.
-  4. Executes `testbarcode.exe` `copies` times.
-  5. Updates job status to `done` or `failed`.
+  2. Validates that the barcode is exactly 8 digits (EAN-8).
+  3. Writes a queued row to `print_jobs` with payload metadata (includes printer name).
+  4. Resolves the correct printer binary path in dev/prod; throws early if missing.
+  5. Executes the barcode binary `copies` times.
+  6. Updates job status to `done` or `failed`.
 - **Returns**: Resolves `true` after printer loop completes; rejects with an error message if the binary fails.
 
 ### `window.api.printBarcode(sku, name)` *(legacy)*
@@ -217,12 +400,12 @@ interface ExportSalesExcelResult {
 - **IPC**: `ipcMain.handle('print-receipt-sale')`
 - **Steps**:
   1. Loads sale header (`total_cents`).
-  2. Loads `sale_items` and formats `name|unit_price` string (unit price in so'm).
-  3. Inserts a queued `print_jobs` row with serialized payload.
-  4. Executes `receipt.exe` with `[printerName || 'receipt', storeName, itemsString, total]`.
-  5. Updates the job status to `done` or `failed`.
+  2. Loads `sale_items` and formats `name|qty|unit_price|line_total` string (values in so'm).
+  3. Includes `subtotal`, `discount`, `total`, and `payment_method` in the payload.
+  4. Inserts a queued `print_jobs` row with serialized payload.
+  5. Executes `receipt2.exe` with `[printerName || 'receipt', "Do'kondor POS", itemsString, subtotal, discount, total, paymentMethod]` (fallback: `receipt.exe`).
+  6. Updates the job status to `done` or `failed`.
 - **Returns**: `{ success: true }` or `{ success: false, error }`.
-- **Note**: `storeName` is currently hardcoded to `"Do'kon"` in the IPC handler.
 
 ### `window.api.printReceipt(storeName, items, total)` *(legacy)*
 - **IPC**: `ipcMain.on('trigger-receipt')`
@@ -233,7 +416,8 @@ interface ExportSalesExcelResult {
 ## Error Handling
 
 - All `ipcRenderer.invoke` calls propagate thrown errors as rejected Promises. Wrap calls in `try/catch` and display human-friendly strings.
-- `addProduct` returns `{ success: false }` on DB errors (no throw). `updateProduct`, `setStock`, and `createSale` throw on validation/DB errors.
+- `addProduct` returns `{ success: false }` on DB errors (no throw). `updateProduct`, `setStock`, `createSale`, and auth/debt handlers throw on validation/DB errors.
+- `deleteProduct` never throws; it returns `{ success: false }` when the product is missing.
 - Printer APIs return structured responses only for the job-based methods. Legacy `printBarcode` and `printReceipt` have no completion signal beyond main-process logs.
 
 ---
@@ -300,6 +484,10 @@ try {
 } catch (err: any) {
   setError(err.message)
 }
+
+// Analytics report
+const report = await window.api.getAnalyticsReport({ from: '2026-02-01', to: '2026-02-15' })
+console.log(report.summary.totalCents)
 ```
 
 ---
@@ -310,6 +498,11 @@ All handlers live in `src/main/ipc/index.ts`. Search for the channel string to i
 
 | Channel | Purpose |
 |---------|---------|
+| `auth-status` | Session status (has owner, authenticated, username) |
+| `auth-setup-owner` | First owner creation |
+| `auth-login` | Login flow |
+| `auth-logout` | Clear session |
+| `auth-change-password` | Update owner password |
 | `get-products` | Inventory listing + barcode auto-fill |
 | `add-product` | Insert inventory (auto barcode/SKU) |
 | `update-product` | Update inventory fields |
@@ -317,9 +510,16 @@ All handlers live in `src/main/ipc/index.ts`. Search for the channel string to i
 | `find-product` | Barcode lookup |
 | `set-stock` | Manual quantity override |
 | `create-sale` | Checkout transaction |
-| `get-sales` | Sales summary |
+| `get-sales` | Sales summary (latest 50) |
+| `get-sales-all` | Sales summary (all) |
 | `get-sale-items` | Sale line items |
-| `pay-debt` | Record debt payment |
+| `clear-sales-records` | Clears sales + sale-linked debts |
+| `get-analytics-report` | Summary + inventory analytics |
+| `pay-debt` | Apply payment to oldest debts |
+| `get-debts` | Debt list with items |
+| `pay-debt-record` | Pay specific debt row |
+| `delete-debt-record` | Remove debt row |
+| `clear-debts-records` | Clear all debt history |
 | `export-sales-excel` | Excel export dialog + write |
 | `trigger-print` | Legacy barcode |
 | `trigger-receipt` | Legacy receipt |
@@ -328,4 +528,4 @@ All handlers live in `src/main/ipc/index.ts`. Search for the channel string to i
 
 ---
 
-This guide captures the full renderer-facing API surface as of 2026-02-15.
+This guide captures the full renderer-facing API surface as of 2026-02-16.
