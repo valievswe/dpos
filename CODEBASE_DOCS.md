@@ -1,7 +1,7 @@
 # Do'kondor - POS System Codebase Documentation
 
 > **AI-Friendly Reference**
-> Last Updated: 2026-02-16
+> Last Updated: 2026-02-19
 > Version: 2.0.0
 
 ---
@@ -61,7 +61,7 @@ graph TD
 ```
 
 - **State** lives in SQLite (WAL mode). Renderer never talks to the DB directly.
-- **Transactions** (better-sqlite3 `.transaction`) guarantee that sales, stock deductions, debt tracking, and print queue inserts succeed atomically.
+- **Transactions** (better-sqlite3 `.transaction`) guarantee atomic writes for sales, stock deductions, and debt tracking. Print queue writes are transactional within print handlers, but are not part of the checkout transaction.
 - **Printing** uses `execFile` calls plus persisted `print_jobs` rows so failures can be audited.
 
 ---
@@ -134,7 +134,7 @@ Handlers are registered once on app start. Highlights:
   - `delete-product` performs a soft delete and surfaces historical `sale_items` / `stock_movements` counts; requires an explicit `force` when history exists.
   - `add-product` enforces a unit whitelist (`dona|qadoq|litr|metr`), rounds price to cents, clamps initial qty to a non-negative integer, and can auto-generate barcode + SKU.
   - `update-product` validates fields and updates SKU/name/price/unit/barcode; if barcode is blank, it is auto-generated.
-  - `find-product` looks up **barcode only**.
+  - `find-product` looks up **barcode only** and does not filter on `active = 1`.
   - `set-stock` logs an `adjustment` entry in `stock_movements` with old/new qty.
 - **Sales**:
   - `create-sale` enforces stock availability, deduplicates customers by phone when provided, computes totals/discount/tax, writes `sales`, `sale_items`, and inventory movements in a single transaction.
@@ -161,7 +161,7 @@ Handlers are registered once on app start. Highlights:
 ### Printer Service (`src/main/services/printers.ts`)
 - Resolves executable path depending on `app.isPackaged`; in dev it falls back to `resources/bin` under repo root and surfaces missing-binary errors early for barcode labels.
 - `printLabelByProduct` lazily generates an EAN-8 barcode when none exists, accepts `printerName`, logs to `print_jobs`, and runs `label.exe` `copies` times.
-- `printReceiptBySale` rehydrates sale totals + items, formats the legacy `name|unit_price` string, inserts a queued job, and executes `receipt2.exe` (fallback: `receipt.exe`).
+- `printReceiptBySale` rehydrates sale totals + items, formats `name|qty|unit_price|line_total`, inserts a queued job, and executes `receipt2.exe` (fallback: `receipt.exe`).
 - Both methods update `print_jobs.status` to `done` or `failed` with `error` text for observability.
 
 ### Preload Bridge (`src/preload/index.ts`)
@@ -204,7 +204,7 @@ Handlers are registered once on app start. Highlights:
 
 ### Debts: List, Pay, Export, Clear
 - `Debts` uses `getDebts` to show grouped debt rows with line items, status, and totals.
-- Per-debt payments call `payDebtRecord`; customer-wide payments can call `payDebt`.
+- Per-debt payments call `payDebtRecord`; customer-wide payment support exists in backend via `payDebt` (not used by current renderer screens).
 - Debt rows can be deleted via `deleteDebtRecord`, and the entire debt ledger can be cleared via `clearDebtsRecords`.
 - Excel exports re-use `exportSalesExcel` with debt-specific headers.
 
@@ -317,7 +317,9 @@ Failure handling: when binaries fail, the corresponding `print_jobs` row records
 | `npm run dev` | electron-vite development mode (type-safe React + Electron with HMR). |
 | `npm run build` | Type checks both node/web targets then builds all entry points. |
 | `npm run build:unpack` | Build + unpacked electron-builder output. |
-| Platform builds (`build:win`, `build:mac`, `build:linux`) | Run build + electron-builder for platform-specific artifacts. |
+| `npm run build:win` | Runs `npm run build` then `electron-builder --win`. |
+| `npm run build:mac` | Runs `electron-vite build` then `electron-builder --mac`. |
+| `npm run build:linux` | Runs `electron-vite build` then `electron-builder --linux`. |
 | `npm run typecheck` | Convenience alias for both `tsconfig.node.json` and `tsconfig.web.json`. |
 | `npm run lint` | ESLint over the full monorepo. |
 | `npm run format` | Prettier across the repo. |
@@ -330,7 +332,8 @@ Packaging Notes:
 
 ## Quick Reference
 
-- Database path (Windows dev): `%APPDATA%/Do'kondor/pos_system.db` (actual folder depends on appId `com.owner.app`).
+- Database path: `path.join(app.getPath('userData'), 'pos_system.db')` from `src/main/db/index.ts`.
+- Windows example: `%APPDATA%/<Electron userData folder>/pos_system.db` (exact folder name depends on runtime app metadata).
 - Money helper: always convert renderer so'm input via `Math.round(price * 100)` before storing.
 - Unit whitelist: `dona`, `qadoq`, `litr`, `metr`; anything else is coerced to `dona` in `add-product` and `update-product`.
 - Product deletion is soft (`active = 0`); use `window.api.deleteProduct` so history remains intact.
@@ -342,4 +345,5 @@ Packaging Notes:
   2. Expose matching method in `src/preload/index.ts` and update `index.d.ts`.
   3. Consume via `window.api` in React.
 
-This document reflects the current schema, IPC surface, and UI flows as of 2026-02-16.
+This document reflects the current schema, IPC surface, and UI flows as of 2026-02-19.
+

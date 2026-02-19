@@ -9,38 +9,45 @@ const RECEIPT_BINARY_CANDIDATES = ['receipt2.exe', 'receipt.exe'] as const
 const EAN8_PATTERN = /^\d{8}$/
 
 // Helper to find the correct path in Dev vs Prod
-const getBinaryPath = (binaryName: string): string => {
+const getBinaryPaths = (binaryName: string): string[] => {
   if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'bin', binaryName)
+    const candidates = [
+      path.join(process.resourcesPath, 'bin', binaryName),
+      path.join(process.resourcesPath, 'app.asar.unpacked', 'resources', 'bin', binaryName)
+    ]
+    return Array.from(new Set(candidates))
   }
   // Dev: try dist-relative then repo root resources/bin
-  const candidate = path.join(__dirname, '../../resources/bin', binaryName)
-  if (fs.existsSync(candidate)) return candidate
-  return path.join(process.cwd(), 'resources', 'bin', binaryName)
+  return [
+    path.join(__dirname, '../../resources/bin', binaryName),
+    path.join(process.cwd(), 'resources', 'bin', binaryName)
+  ]
 }
 
 const resolveBarcodeBinaryPath = (): { path: string; tried: string[] } => {
   const tried: string[] = []
   for (const name of BARCODE_BINARY_CANDIDATES) {
-    const candidate = getBinaryPath(name)
-    tried.push(candidate)
-    if (fs.existsSync(candidate)) {
-      return { path: candidate, tried }
+    for (const candidate of getBinaryPaths(name)) {
+      tried.push(candidate)
+      if (fs.existsSync(candidate)) {
+        return { path: candidate, tried }
+      }
     }
   }
-  return { path: tried[0] ?? getBinaryPath(BARCODE_BINARY_CANDIDATES[0]), tried }
+  return { path: tried[0] ?? getBinaryPaths(BARCODE_BINARY_CANDIDATES[0])[0], tried }
 }
 
 const resolveReceiptBinaryPath = (): { path: string; tried: string[] } => {
   const tried: string[] = []
   for (const name of RECEIPT_BINARY_CANDIDATES) {
-    const candidate = getBinaryPath(name)
-    tried.push(candidate)
-    if (fs.existsSync(candidate)) {
-      return { path: candidate, tried }
+    for (const candidate of getBinaryPaths(name)) {
+      tried.push(candidate)
+      if (fs.existsSync(candidate)) {
+        return { path: candidate, tried }
+      }
     }
   }
-  return { path: tried[0] ?? getBinaryPath(RECEIPT_BINARY_CANDIDATES[0]), tried }
+  return { path: tried[0] ?? getBinaryPaths(RECEIPT_BINARY_CANDIDATES[0])[0], tried }
 }
 
 const assertEan8 = (value: string): string => {

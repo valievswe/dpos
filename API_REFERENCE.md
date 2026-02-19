@@ -1,7 +1,7 @@
 # Do'kondor API Reference Guide
 
 > **Renderer Access Point:** `window.api` (exposed via `src/preload/index.ts`)
-> **Last Updated:** 2026-02-16
+> **Last Updated:** 2026-02-19
 
 ---
 
@@ -188,10 +188,10 @@ interface AnalyticsReport {
 | `deleteProduct(productId, force?)` | `delete-product` | `Promise<DeleteProductResult>` | Soft delete with confirmation when history exists. |
 | `addProduct(sku, name, price, unit?, qty?, barcode?)` | `add-product` | `Promise<AddProductResult>` | Auto-generates barcode if missing; may overwrite empty SKU. |
 | `updateProduct(productId, payload)` | `update-product` | `Promise<boolean>` | Updates SKU/name/price/unit/barcode; auto-generates barcode when blank. |
-| `findProduct(code)` | `find-product` | `Promise<Product | null>` | **Barcode-only** lookup (no SKU fallback). |
+| `findProduct(code)` | `find-product` | `Promise<Product | null>` | **Barcode-only** lookup (no SKU fallback). Does not filter on `active`. |
 | `setStock(productId, qty)` | `set-stock` | `Promise<boolean>` | Logs an `adjustment` in `stock_movements`. |
 | `createSale(payload)` | `create-sale` | `Promise<{ saleId: number; total_cents: number }>` | Transactional checkout. See `mixed` caveat below. |
-| `getSales()` | `get-sales` | `Promise<SaleSummary[]>` | Latest 50 sales (Tashkent time ordering). |
+| `getSales()` | `get-sales` | `Promise<SaleSummary[]>` | Latest 50 sales by `datetime(sale_date)` descending. |
 | `getSalesAll()` | `get-sales-all` | `Promise<SaleSummary[]>` | Full sales list (no limit). |
 | `getSaleItems(saleId)` | `get-sale-items` | `Promise<SaleItemRow[]>` | Includes `barcode` + `unit` when available. |
 | `clearSalesRecords()` | `clear-sales-records` | `Promise<boolean>` | Deletes sales + sale-linked debts, recalculates customer debt. |
@@ -210,6 +210,8 @@ interface AnalyticsReport {
 ---
 
 ## Auth APIs
+
+> **Auth enforcement note:** Only `auth-change-password` validates an active session in main. Most business IPC methods do not perform session checks and rely on renderer gating (`AuthGate`).
 
 ### `window.api.getAuthStatus()`
 - **IPC**: `ipcMain.handle('auth-status')`
@@ -278,11 +280,12 @@ interface AnalyticsReport {
 ### `window.api.findProduct(code)`
 - **IPC**: `ipcMain.handle('find-product')`
 - **Description**: Resolves a product by **barcode only**. Returns `null` if not found.
+- **Important**: Query is `SELECT ... WHERE barcode = ? LIMIT 1` with no `active = 1` condition, so inactive products may still resolve.
 - **Note**: There is no SKU fallback in the main process.
 
 ### `window.api.setStock(productId, qty)`
 - **IPC**: `ipcMain.handle('set-stock')`
-- **Behavior**: Updates `products.qty` and records an `adjustment` row in `stock_movements` with `old_qty`, `new_qty`, and pricing context.
+- **Behavior**: Updates `products.qty` exactly to the provided numeric value and records an `adjustment` row in `stock_movements` with `old_qty`, `new_qty`, and pricing context.
 - **Returns**: Resolves `true` on success; throws if the product is missing.
 
 ---
@@ -419,6 +422,7 @@ interface AnalyticsReport {
 - `addProduct` returns `{ success: false }` on DB errors (no throw). `updateProduct`, `setStock`, `createSale`, and auth/debt handlers throw on validation/DB errors.
 - `deleteProduct` never throws; it returns `{ success: false }` when the product is missing.
 - Printer APIs return structured responses only for the job-based methods. Legacy `printBarcode` and `printReceipt` have no completion signal beyond main-process logs.
+- `printBarcodeByProduct` rejects on failure. `printReceiptBySale` catches failures and returns `{ success: false, error }` instead of rejecting in normal error paths.
 
 ---
 
@@ -528,4 +532,4 @@ All handlers live in `src/main/ipc/index.ts`. Search for the channel string to i
 
 ---
 
-This guide captures the full renderer-facing API surface as of 2026-02-16.
+This guide captures the full renderer-facing API surface as of 2026-02-19.
