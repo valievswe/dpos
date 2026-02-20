@@ -7,6 +7,7 @@ export interface Product {
   sku: string
   name: string
   price: number
+  costPrice: number
   stock: number
   barcode?: string
   unit?: string
@@ -24,6 +25,8 @@ export interface DebtRecord {
   customerId: number
   customerName: string
   saleId?: number
+  saleTotalCents?: number
+  salePaidCents?: number
   description: string
   debtDate: string
   paymentDate?: string
@@ -72,8 +75,14 @@ export interface AnalyticsReport {
   summary: {
     salesCount: number
     totalCents: number
+    returnedCents: number
+    netSalesCents: number
     discountCents: number
     debtCents: number
+    refundCents: number
+    debtReducedByReturnsCents: number
+    grossProfitCents: number
+    netProfitCents: number
     avgCheckCents: number
   }
   previousSummary: null | {
@@ -98,6 +107,54 @@ export interface AuthStatus {
   hasOwner: boolean
   authenticated: boolean
   username: string | null
+}
+
+export interface SaleRecord {
+  id: number
+  sale_date: string
+  total_cents: number
+  paid_cents: number
+  debt_added_cents: number
+  debt_reduced_cents: number
+  debt_cents: number
+  returned_cents: number
+  refund_cents: number
+  payment_method: string
+  customer_name?: string
+  customer_phone?: string
+}
+
+export interface SaleItemRow {
+  sale_item_id: number
+  product_name: string
+  barcode?: string
+  unit?: string
+  quantity: number
+  unit_price_cents: number
+  line_total_cents: number
+  returned_qty?: number
+  returnable_qty?: number
+}
+
+export interface SaleReturnItem {
+  productName: string
+  quantity: number
+  unitPriceCents: number
+  lineTotalCents: number
+}
+
+export interface SaleReturnRecord {
+  id: number
+  saleId: number
+  customerId?: number
+  customerName: string
+  returnDate: string
+  totalCents: number
+  debtReducedCents: number
+  refundCents: number
+  refundMethod?: 'cash' | 'card'
+  note?: string
+  items: SaleReturnItem[]
 }
 
 // 2. Define the API object with explicit types
@@ -137,12 +194,16 @@ const api = {
     price: number,
     unit = 'dona',
     qty = 0,
-    barcode?: string
+    barcode?: string,
+    costPrice?: number
   ): Promise<{ success: boolean; productId?: number; barcode?: string }> => {
-    return ipcRenderer.invoke('add-product', sku, name, price, unit, qty, barcode)
+    return ipcRenderer.invoke('add-product', sku, name, price, unit, qty, barcode, costPrice)
   },
 
-  updateProduct: (productId: number, payload: { sku?: string; name: string; price: number; unit?: string; barcode?: string }) => {
+  updateProduct: (
+    productId: number,
+    payload: { sku?: string; name: string; price: number; costPrice?: number; unit?: string; barcode?: string }
+  ) => {
     return ipcRenderer.invoke('update-product', productId, payload)
   },
 
@@ -159,20 +220,46 @@ const api = {
     paymentMethod: 'cash' | 'card' | 'mixed' | 'debt'
     discountCents?: number
     customer?: { name: string; phone?: string }
+    paidCents?: number
+    paidMethod?: 'cash' | 'card'
   }) => {
     return ipcRenderer.invoke('create-sale', payload)
   },
 
-  getSales: () => {
+  getSales: (): Promise<SaleRecord[]> => {
     return ipcRenderer.invoke('get-sales')
   },
 
-  getSalesAll: () => {
+  getSalesAll: (): Promise<SaleRecord[]> => {
     return ipcRenderer.invoke('get-sales-all')
   },
 
-  getSaleItems: (saleId: number) => {
+  getSaleItems: (saleId: number): Promise<SaleItemRow[]> => {
     return ipcRenderer.invoke('get-sale-items', saleId)
+  },
+
+  createSaleReturn: (payload: {
+    saleId: number
+    items: { saleItemId: number; qty: number }[]
+    refundMethod?: 'cash' | 'card'
+    note?: string
+  }): Promise<{
+    success: boolean
+    returnId: number
+    totalReturnedCents: number
+    debtReducedCents: number
+    refundCents: number
+    refundMethod?: 'cash' | 'card'
+  }> => {
+    return ipcRenderer.invoke('create-sale-return', payload)
+  },
+
+  getSaleReturns: (): Promise<SaleReturnRecord[]> => {
+    return ipcRenderer.invoke('get-sale-returns')
+  },
+
+  printReturnReceiptById: (returnId: number, printerName?: string): Promise<{ success: boolean; error?: string }> => {
+    return ipcRenderer.invoke('print-return-receipt', returnId, printerName)
   },
 
   clearSalesRecords: (): Promise<boolean> => {

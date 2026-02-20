@@ -212,6 +212,100 @@ export const PrinterService = {
       throw err
     }
   },
+
+  async printReturnReceiptById(returnId: number, storeName = "Do'kondor POS", printerName = 'receipt') {
+    const db = getDB()
+    const ret = db
+      .prepare(
+        `SELECT id, sale_id, total_cents, debt_reduced_cents, refund_cents, refund_method
+         FROM sale_returns
+         WHERE id = ?`
+      )
+      .get(returnId) as
+      | {
+          id: number
+          sale_id: number
+          total_cents: number
+          debt_reduced_cents: number
+          refund_cents: number
+          refund_method?: string | null
+        }
+      | undefined
+    if (!ret) throw new Error('Qaytish topilmadi')
+
+    const items = db
+      .prepare(
+        `SELECT si.product_name AS name, sri.quantity, sri.unit_price_cents, sri.line_total_cents
+         FROM sale_return_items sri
+         LEFT JOIN sale_items si ON si.id = sri.sale_item_id
+         WHERE sri.return_id = ?
+         ORDER BY sri.id ASC`
+      )
+      .all(returnId)
+
+    const itemsString = items
+      .map((i: any) => {
+        const name = sanitizeReceiptField(i.name)
+        const qty = formatQty(Number(i.quantity ?? 0))
+        const unitPrice = formatSom(Number(i.unit_price_cents ?? 0))
+        const lineTotal = formatSom(Number(i.line_total_cents ?? 0))
+        return `${name}|${qty}|${unitPrice}|${lineTotal}`
+      })
+      .join(';')
+
+    const subtotal = formatSom(Number(ret.total_cents ?? 0))
+    const discount = formatSom(Number(ret.debt_reduced_cents ?? 0))
+    const total = formatSom(Number(ret.refund_cents ?? 0))
+    const paymentType =
+      ret.refund_method === 'card'
+        ? 'refund_card'
+        : ret.refund_method === 'cash'
+          ? 'refund_cash'
+          : 'debt_offset'
+
+    const payload = {
+      printer: printerName,
+      storeName: `${storeName} QAYTISH #${ret.id}`,
+      itemsString,
+      subtotal,
+      discount,
+      total,
+      paymentType
+    }
+    const jobId = db
+      .prepare(
+        `INSERT INTO print_jobs (kind, sale_id, status, payload)
+         VALUES ('receipt', ?, 'queued', ?)`,
+      )
+      .run(ret.sale_id, JSON.stringify(payload)).lastInsertRowid
+
+    const { path: exePath, tried } = resolveReceiptBinaryPath()
+    if (!fs.existsSync(exePath)) {
+      throw new Error(`Chek printer binari topilmadi. Tekshirildi: ${tried.join(', ')}`)
+    }
+    const args = [
+      payload.printer,
+      payload.storeName,
+      payload.itemsString,
+      payload.subtotal,
+      payload.discount,
+      payload.total,
+      payload.paymentType
+    ]
+
+    try {
+      await runExec(exePath, args)
+      db.prepare('UPDATE print_jobs SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+        'done',
+        jobId,
+      )
+    } catch (err: any) {
+      db.prepare(
+        'UPDATE print_jobs SET status = ?, error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      ).run('failed', err.message, jobId)
+      throw err
+    }
+  },
 }
 
 function runExec(exePath: string, args: string[]): Promise<void> {

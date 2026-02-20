@@ -27,8 +27,14 @@ type AnalyticsReport = {
   summary: {
     salesCount: number
     totalCents: number
+    returnedCents: number
+    netSalesCents: number
     discountCents: number
     debtCents: number
+    refundCents: number
+    debtReducedByReturnsCents: number
+    grossProfitCents: number
+    netProfitCents: number
     avgCheckCents: number
   }
   previousSummary: null | {
@@ -50,7 +56,19 @@ type AnalyticsReport = {
 
 const emptyReport: AnalyticsReport = {
   period: {},
-  summary: { salesCount: 0, totalCents: 0, discountCents: 0, debtCents: 0, avgCheckCents: 0 },
+  summary: {
+    salesCount: 0,
+    totalCents: 0,
+    returnedCents: 0,
+    netSalesCents: 0,
+    discountCents: 0,
+    debtCents: 0,
+    refundCents: 0,
+    debtReducedByReturnsCents: 0,
+    grossProfitCents: 0,
+    netProfitCents: 0,
+    avgCheckCents: 0
+  },
   previousSummary: null,
   comparison: null,
   payments: [],
@@ -63,6 +81,7 @@ const formatSom = (cents: number) => `${(cents / 100).toLocaleString('uz-UZ')} s
 const paymentLabel = (method: string) => {
   if (method === 'cash') return 'Naqd'
   if (method === 'card') return 'Karta'
+  if (method === 'mixed') return 'Qisman'
   if (method === 'debt') return 'Qarz'
   return method
 }
@@ -176,9 +195,19 @@ export function AnalysisPage(): React.ReactElement {
     loadMonthlyCompare()
   }, [monthA, monthB])
 
-  const maxDaily = useMemo(() => report.daily.reduce((m, row) => Math.max(m, row.totalCents), 0), [report.daily])
-  const maxTopProduct = useMemo(() => report.topProducts.reduce((m, row) => Math.max(m, row.revenueCents), 0), [report.topProducts])
   const totalPaymentsCents = useMemo(() => report.payments.reduce((sum, row) => sum + row.totalCents, 0), [report.payments])
+  const summaryRows = useMemo(
+    () => [
+      { label: 'Umumiy sotuv', value: report.summary.totalCents },
+      { label: 'Qaytarilgan summa', value: report.summary.returnedCents },
+      { label: 'Sof sotuv', value: report.summary.netSalesCents },
+      { label: "Dastlabki qarzga yozilgan", value: report.summary.debtCents },
+      { label: 'Qaytishda qarzdan yechilgan', value: report.summary.debtReducedByReturnsCents },
+      { label: 'Mijozga qaytarilgan (kassa chiqimi)', value: report.summary.refundCents },
+      { label: 'Sof foyda', value: report.summary.netProfitCents }
+    ],
+    [report.summary]
+  )
 
   const monthFactorRows = useMemo(() => {
     if (!monthAReport || !monthBReport) return []
@@ -203,9 +232,15 @@ export function AnalysisPage(): React.ReactElement {
       const rows: (string | number)[][] = [
         ['Davr', periodText],
         ['Sotuvlar soni', report.summary.salesCount],
-        ['Umumiy tushum (so\'m)', report.summary.totalCents / 100],
+        ['Umumiy sotuv (so\'m)', report.summary.totalCents / 100],
+        ['Qaytarilgan summa (so\'m)', report.summary.returnedCents / 100],
+        ['Sof sotuv (so\'m)', report.summary.netSalesCents / 100],
+        ['Pul qaytarilgan (so\'m)', report.summary.refundCents / 100],
+        ['Qarzdan yechilgan (so\'m)', report.summary.debtReducedByReturnsCents / 100],
         ['Chegirma (so\'m)', report.summary.discountCents / 100],
         ['Qarzga sotuv (so\'m)', report.summary.debtCents / 100],
+        ['Brutto foyda (so\'m)', report.summary.grossProfitCents / 100],
+        ['Sof foyda (so\'m)', report.summary.netProfitCents / 100],
         ["O'rtacha chek (so'm)", report.summary.avgCheckCents / 100],
         ['Tushum o\'zgarishi (%)', report.comparison?.totalPct ?? 'N/A'],
         ['Sotuv soni o\'zgarishi (%)', report.comparison?.salesCountPct ?? 'N/A'],
@@ -243,14 +278,25 @@ export function AnalysisPage(): React.ReactElement {
         </div>
 
         <DateRangeFilter from={dateRange.from} to={dateRange.to} onChange={(range) => setDateRange(range)} />
+        {loading && <div style={{ color: 'var(--muted)' }}>Analitika yuklanmoqda...</div>}
         {error && <div style={{ color: 'var(--danger)' }}>{error}</div>}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
         <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 12, background: 'var(--surface-2)' }}>
-          <div style={{ color: 'var(--muted)' }}>Umumiy tushum</div>
+          <div style={{ color: 'var(--muted)' }}>Umumiy sotuv</div>
           <div style={{ color: 'var(--accent)', fontWeight: 800, fontSize: '1.25rem' }}>{formatSom(report.summary.totalCents)}</div>
           <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>{compareText(report.comparison?.totalPct ?? null)}</div>
+        </div>
+        <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 12, background: 'var(--surface-2)' }}>
+          <div style={{ color: 'var(--muted)' }}>Qaytarilgan summa</div>
+          <div style={{ color: '#fda4af', fontWeight: 800, fontSize: '1.25rem' }}>{formatSom(report.summary.returnedCents)}</div>
+          <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Pul qaytarilgan: {formatSom(report.summary.refundCents)}</div>
+        </div>
+        <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 12, background: 'var(--surface-2)' }}>
+          <div style={{ color: 'var(--muted)' }}>Sof sotuv</div>
+          <div style={{ color: '#e5e7eb', fontWeight: 800, fontSize: '1.25rem' }}>{formatSom(report.summary.netSalesCents)}</div>
+          <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Qaytishdan keyingi natija</div>
         </div>
         <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 12, background: 'var(--surface-2)' }}>
           <div style={{ color: 'var(--muted)' }}>Sotuvlar soni</div>
@@ -265,7 +311,34 @@ export function AnalysisPage(): React.ReactElement {
         <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 12, background: 'var(--surface-2)' }}>
           <div style={{ color: 'var(--muted)' }}>Qarzga sotuv</div>
           <div style={{ color: '#fbbf24', fontWeight: 800, fontSize: '1.25rem' }}>{formatSom(report.summary.debtCents)}</div>
-          <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Chegirma: {formatSom(report.summary.discountCents)}</div>
+          <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Qarzdan yechilgan: {formatSom(report.summary.debtReducedByReturnsCents)}</div>
+        </div>
+        <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 12, background: 'var(--surface-2)' }}>
+          <div style={{ color: 'var(--muted)' }}>Sof foyda</div>
+          <div style={{ color: '#bbf7d0', fontWeight: 800, fontSize: '1.25rem' }}>{formatSom(report.summary.netProfitCents)}</div>
+          <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Brutto: {formatSom(report.summary.grossProfitCents)}</div>
+        </div>
+      </div>
+
+      <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 12, background: 'var(--surface-2)' }}>
+        <div style={{ fontWeight: 700, marginBottom: 8 }}>Asosiy moliyaviy ko'rsatkichlar</div>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border-soft)' }}>
+                <th>Ko'rsatkich</th>
+                <th style={{ textAlign: 'right' }}>Qiymat</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summaryRows.map((row) => (
+                <tr key={row.label} style={{ borderBottom: '1px solid var(--border-soft)' }}>
+                  <td>{row.label}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700 }}>{formatSom(row.value)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -315,67 +388,72 @@ export function AnalysisPage(): React.ReactElement {
         )}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 12 }}>
-        <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 12, background: 'var(--surface-2)' }}>
-          <div style={{ fontWeight: 700, marginBottom: 8 }}>Kunlik tushum diagrammasi</div>
-          <div style={{ display: 'grid', gap: 6, maxHeight: 280, overflowY: 'auto' }}>
-            {loading && <div style={{ color: 'var(--muted)' }}>Yuklanmoqda...</div>}
-            {!loading && report.daily.length === 0 && <div style={{ color: 'var(--muted)' }}>Davrda sotuv yo'q</div>}
-            {!loading && report.daily.map((row) => {
-              const widthPct = maxDaily > 0 ? (row.totalCents / maxDaily) * 100 : 0
-              return (
-                <div key={row.day} style={{ display: 'grid', gridTemplateColumns: '100px 1fr auto', gap: 8, alignItems: 'center' }}>
-                  <div style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>{row.day}</div>
-                  <div style={{ height: 10, borderRadius: 5, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
-                    <div style={{ width: `${widthPct}%`, height: '100%', background: 'linear-gradient(90deg, var(--accent), var(--accent-strong))' }} />
-                  </div>
-                  <div style={{ color: '#e5e7eb', fontSize: '0.85rem' }}>{(row.totalCents / 100).toLocaleString('uz-UZ')}</div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-
-        <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 12, background: 'var(--surface-2)' }}>
-          <div style={{ fontWeight: 700, marginBottom: 8 }}>To'lov turlari ulushi</div>
-          <div style={{ display: 'grid', gap: 8 }}>
-            {report.payments.length === 0 && <div style={{ color: 'var(--muted)' }}>Ma'lumot yo'q</div>}
-            {report.payments.map((p) => {
-              const share = totalPaymentsCents > 0 ? (p.totalCents / totalPaymentsCents) * 100 : 0
-              return (
-                <div key={p.method} style={{ display: 'grid', gap: 4 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
-                    <span>{paymentLabel(p.method)}</span>
-                    <span style={{ color: 'var(--muted)' }}>{share.toFixed(1)}%</span>
-                  </div>
-                  <div style={{ height: 10, borderRadius: 5, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
-                    <div style={{ width: `${share}%`, height: '100%', background: p.method === 'debt' ? '#fbbf24' : 'var(--success)' }} />
-                  </div>
-                  <div style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>{formatSom(p.totalCents)} ({p.salesCount} ta)</div>
-                </div>
-              )
-            })}
-          </div>
+      <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 12, background: 'var(--surface-2)' }}>
+        <div style={{ fontWeight: 700, marginBottom: 8 }}>To'lov turlari ulushi</div>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border-soft)' }}>
+                <th>To'lov turi</th>
+                <th style={{ textAlign: 'right' }}>Sotuv soni</th>
+                <th style={{ textAlign: 'right' }}>Summa</th>
+                <th style={{ textAlign: 'right' }}>Ulushi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.payments.length === 0 && (
+                <tr>
+                  <td colSpan={4} style={{ color: 'var(--muted)', textAlign: 'center' }}>
+                    Ma'lumot yo'q
+                  </td>
+                </tr>
+              )}
+              {report.payments.map((p) => {
+                const share = totalPaymentsCents > 0 ? (p.totalCents / totalPaymentsCents) * 100 : 0
+                return (
+                  <tr key={p.method} style={{ borderBottom: '1px solid var(--border-soft)' }}>
+                    <td>{paymentLabel(p.method)}</td>
+                    <td style={{ textAlign: 'right' }}>{p.salesCount.toLocaleString('uz-UZ')}</td>
+                    <td style={{ textAlign: 'right' }}>{formatSom(p.totalCents)}</td>
+                    <td style={{ textAlign: 'right' }}>{share.toFixed(1)}%</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
 
       <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 12, background: 'var(--surface-2)' }}>
         <div style={{ fontWeight: 700, marginBottom: 8 }}>Eng ko'p daromad bergan mahsulotlar (Top 10)</div>
-        <div style={{ display: 'grid', gap: 8 }}>
-          {report.topProducts.length === 0 && <div style={{ color: 'var(--muted)' }}>Ma'lumot yo'q</div>}
-          {report.topProducts.map((row) => {
-            const widthPct = maxTopProduct > 0 ? (row.revenueCents / maxTopProduct) * 100 : 0
-            return (
-              <div key={row.productId} style={{ display: 'grid', gridTemplateColumns: '1.3fr 2fr auto auto', gap: 10, alignItems: 'center' }}>
-                <div style={{ fontWeight: 600 }}>{row.productName}</div>
-                <div style={{ height: 10, borderRadius: 5, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
-                  <div style={{ width: `${widthPct}%`, height: '100%', background: 'linear-gradient(90deg, #3b82f6, #22d3ee)' }} />
-                </div>
-                <div style={{ color: 'var(--muted)' }}>{row.qty.toLocaleString('uz-UZ')}</div>
-                <div style={{ color: 'var(--accent)', fontWeight: 700 }}>{formatSom(row.revenueCents)}</div>
-              </div>
-            )
-          })}
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border-soft)' }}>
+                <th>Mahsulot</th>
+                <th style={{ textAlign: 'right' }}>Sotilgan miqdor</th>
+                <th style={{ textAlign: 'right' }}>Tushum</th>
+                <th style={{ textAlign: 'right' }}>O'rtacha narx</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.topProducts.length === 0 && (
+                <tr>
+                  <td colSpan={4} style={{ color: 'var(--muted)', textAlign: 'center' }}>
+                    Ma'lumot yo'q
+                  </td>
+                </tr>
+              )}
+              {report.topProducts.map((row) => (
+                <tr key={row.productId} style={{ borderBottom: '1px solid var(--border-soft)' }}>
+                  <td style={{ fontWeight: 600 }}>{row.productName}</td>
+                  <td style={{ textAlign: 'right' }}>{row.qty.toLocaleString('uz-UZ')}</td>
+                  <td style={{ textAlign: 'right' }}>{formatSom(row.revenueCents)}</td>
+                  <td style={{ textAlign: 'right' }}>{formatSom(row.avgPriceCents)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

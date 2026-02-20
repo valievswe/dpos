@@ -12,10 +12,12 @@ export function SalesPage(): React.ReactElement {
   const { products, reload, error: loadError } = useProducts()
   const [cart, setCart] = useState<CartLine[]>([])
   const [query, setQuery] = useState('')
-  const [payment, setPayment] = useState<'cash' | 'card' | 'debt'>('cash')
+  const [payment, setPayment] = useState<'cash' | 'card' | 'mixed' | 'debt'>('cash')
   const [discount, setDiscount] = useState('0')
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
+  const [mixedPaid, setMixedPaid] = useState('')
+  const [mixedMethod, setMixedMethod] = useState<'cash' | 'card'>('cash')
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
@@ -112,6 +114,7 @@ export function SalesPage(): React.ReactElement {
     const num = parseFloat(discount)
     return Number.isFinite(num) && num > 0 ? num : 0
   }, [discount])
+  const totalAfterDiscount = useMemo(() => Math.max(total - discountValue, 0), [total, discountValue])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -135,20 +138,40 @@ export function SalesPage(): React.ReactElement {
       return
     }
 
-    if (payment === 'debt' && !customerName.trim()) {
+    if ((payment === 'debt' || payment === 'mixed') && !customerName.trim()) {
       setError('Qarz uchun mijoz ismi talab qilinadi')
       return
     }
 
     try {
+      let mixedPaidCents: number | undefined
+      let mixedPaidMethod: 'cash' | 'card' | undefined
+      if (payment === 'mixed') {
+        const paidSom = Number(mixedPaid)
+        if (!Number.isFinite(paidSom) || paidSom <= 0) {
+          setError("Qisman to'lov summasini to'g'ri kiriting")
+          return
+        }
+        const paidCents = Math.round(paidSom * 100)
+        const totalAfterDiscountCents = Math.round(totalAfterDiscount * 100)
+        if (paidCents >= totalAfterDiscountCents) {
+          setError("Qisman to'lov jami summadan kichik bo'lishi kerak")
+          return
+        }
+        mixedPaidCents = paidCents
+        mixedPaidMethod = mixedMethod
+      }
+
       const payload = {
         items: cart.map((c) => ({ productId: c.product.id, qty: c.qty })),
         paymentMethod: payment,
         discountCents: Math.round(discountValue * 100),
         customer:
-          payment === 'debt'
+          payment === 'debt' || payment === 'mixed'
             ? { name: customerName.trim(), phone: customerPhone.trim() || undefined }
-            : undefined
+            : undefined,
+        paidCents: mixedPaidCents,
+        paidMethod: mixedPaidMethod
       }
 
       const res = await window.api.createSale(payload)
@@ -168,6 +191,8 @@ export function SalesPage(): React.ReactElement {
     setDiscount('0')
     setCustomerName('')
     setCustomerPhone('')
+    setMixedPaid('')
+    setMixedMethod('cash')
     setPayment('cash')
     if (!keepMessage) setMessage(null)
     setError(null)
@@ -558,7 +583,7 @@ export function SalesPage(): React.ReactElement {
             To'lov turi
             <select
               value={payment}
-              onChange={(e) => setPayment(e.target.value as 'cash' | 'card' | 'debt')}
+              onChange={(e) => setPayment(e.target.value as 'cash' | 'card' | 'mixed' | 'debt')}
               style={{
                 padding: '12px',
                 borderRadius: '5px',
@@ -569,12 +594,13 @@ export function SalesPage(): React.ReactElement {
             >
               <option value="cash">Naqd</option>
               <option value="card">Karta</option>
+              <option value="mixed">Qisman (qarz)</option>
               <option value="debt">Qarz</option>
             </select>
           </label>
         </div>
 
-        {payment === 'debt' && (
+        {(payment === 'debt' || payment === 'mixed') && (
           <div
             style={{
               display: 'grid',
@@ -609,6 +635,61 @@ export function SalesPage(): React.ReactElement {
           </div>
         )}
 
+        {payment === 'mixed' && (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+              gap: '12px'
+            }}
+          >
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--muted)' }}>
+              To'langan summa (so'm)
+              <input
+                type="number"
+                min={0}
+                value={mixedPaid}
+                onChange={(e) => setMixedPaid(e.target.value)}
+                placeholder="0"
+                style={{
+                  padding: '12px',
+                  borderRadius: '5px',
+                  border: '1px solid var(--border)',
+                  background: 'var(--surface-3)',
+                  color: '#f9fafb'
+                }}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--muted)' }}>
+              To'lov usuli
+              <select
+                value={mixedMethod}
+                onChange={(e) => setMixedMethod(e.target.value as 'cash' | 'card')}
+                style={{
+                  padding: '12px',
+                  borderRadius: '5px',
+                  border: '1px solid var(--border)',
+                  background: 'var(--surface-3)',
+                  color: '#f9fafb'
+                }}
+              >
+                <option value="cash">Naqd</option>
+                <option value="card">Karta</option>
+              </select>
+            </label>
+            <div
+              style={{
+                gridColumn: isMobile ? 'auto' : '1 / -1',
+                color: 'var(--muted)',
+                fontSize: '0.9rem'
+              }}
+            >
+              Qarzga yoziladi:{' '}
+              {Math.max(totalAfterDiscount - (Number.isFinite(Number(mixedPaid)) ? Number(mixedPaid) : 0), 0).toLocaleString('uz-UZ')} so'm
+            </div>
+          </div>
+        )}
+
         <div
           style={{
             display: 'flex',
@@ -621,7 +702,7 @@ export function SalesPage(): React.ReactElement {
           }}
         >
           <span>Jami</span>
-          <span>{Math.max(total - discountValue, 0).toLocaleString('uz-UZ')} so'm</span>
+          <span>{totalAfterDiscount.toLocaleString('uz-UZ')} so'm</span>
         </div>
 
         <div style={{ display: 'flex', gap: '12px' }}>

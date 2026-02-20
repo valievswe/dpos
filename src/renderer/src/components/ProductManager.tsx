@@ -6,6 +6,7 @@ import { Modal } from './ui/Modal'
 export function ProductManager(): React.ReactElement {
   const { products, loading, error: loadError, reload } = useProducts()
   const [name, setName] = useState('')
+  const [costPrice, setCostPrice] = useState('')
   const [price, setPrice] = useState('')
   const [unit, setUnit] = useState('dona')
   const [qty, setQty] = useState('0')
@@ -16,6 +17,7 @@ export function ProductManager(): React.ReactElement {
   const [showAdd, setShowAdd] = useState(false)
   const [editing, setEditing] = useState<Product | null>(null)
   const [editName, setEditName] = useState('')
+  const [editCostPrice, setEditCostPrice] = useState('')
   const [editPrice, setEditPrice] = useState('')
   const [editUnit, setEditUnit] = useState('dona')
   const [editBarcode, setEditBarcode] = useState('')
@@ -54,9 +56,14 @@ export function ProductManager(): React.ReactElement {
     e.preventDefault()
     setError(null)
     try {
+      const numericCostPrice = Number(costPrice)
       const numericPrice = Number(price)
+      if (Number.isNaN(numericCostPrice) || numericCostPrice < 0) {
+        setError("Tan narxi noto'g'ri kiritildi")
+        return
+      }
       if (Number.isNaN(numericPrice) || numericPrice < 0) {
-        setError("Narx noto'g'ri kiritildi")
+        setError("Sotuv narxi noto'g'ri kiritildi")
         return
       }
       const cleanBarcode = barcode.trim()
@@ -65,9 +72,18 @@ export function ProductManager(): React.ReactElement {
         setError("Boshlang'ich qoldiq noto'g'ri")
         return
       }
-      const res = await window.api.addProduct('', name.trim(), numericPrice, unit, initialQty, cleanBarcode || undefined)
+      const res = await window.api.addProduct(
+        '',
+        name.trim(),
+        numericPrice,
+        unit,
+        initialQty,
+        cleanBarcode || undefined,
+        numericCostPrice
+      )
       if (!res.success || !res.productId) throw new Error("Mahsulot qo'shilmadi")
       setName('')
+      setCostPrice('')
       setPrice('')
       setUnit('dona')
       setQty('0')
@@ -87,6 +103,7 @@ export function ProductManager(): React.ReactElement {
     setInfo(null)
     setEditing(product)
     setEditName(product.name)
+    setEditCostPrice(product.costPrice.toString())
     setEditPrice(product.price.toString())
     setEditUnit(product.unit ?? 'dona')
     setEditBarcode(product.barcode ?? '')
@@ -97,14 +114,20 @@ export function ProductManager(): React.ReactElement {
     if (!editing) return
     setError(null)
     try {
+      const numericCostPrice = Number(editCostPrice)
       const numericPrice = Number(editPrice)
+      if (Number.isNaN(numericCostPrice) || numericCostPrice < 0) {
+        setError("Tan narxi noto'g'ri kiritildi")
+        return
+      }
       if (Number.isNaN(numericPrice) || numericPrice < 0) {
-        setError("Narx noto'g'ri kiritildi")
+        setError("Sotuv narxi noto'g'ri kiritildi")
         return
       }
       const cleanBarcode = editBarcode.trim()
       const ok = await window.api.updateProduct(editing.id, {
         name: editName.trim(),
+        costPrice: numericCostPrice,
         price: numericPrice,
         unit: editUnit,
         barcode: cleanBarcode || undefined
@@ -218,6 +241,7 @@ export function ProductManager(): React.ReactElement {
               <option value="qadoq">Qadoq</option>
               <option value="litr">Litr</option>
               <option value="metr">Metr</option>
+              <option value="kg">Kg</option>
             </select>
           </label>
           <label style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -237,7 +261,25 @@ export function ProductManager(): React.ReactElement {
             />
           </label>
           <label style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <span>Narx (so'm)</span>
+            <span>Tan narxi (so'm)</span>
+            <input
+              type="number"
+              step="0.01"
+              placeholder="0.00"
+              value={costPrice}
+              onChange={(e) => setCostPrice(e.target.value)}
+              required
+              style={{
+                padding: '10px',
+                borderRadius: '5px',
+                border: '1px solid var(--border)',
+                background: 'var(--surface-3)',
+                color: '#f9fafb'
+              }}
+            />
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <span>Sotuv narxi (so'm)</span>
             <input
               type="number"
               step="0.01"
@@ -343,7 +385,9 @@ export function ProductManager(): React.ReactElement {
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)', textAlign: 'left', color: 'var(--muted)' }}>
                   <th>Nomi</th>
-                  <th>Narx</th>
+                  <th>Sotuv narxi</th>
+                  <th>Tan narxi</th>
+                  <th>Foyda / dona</th>
                   <th>Qoldiq</th>
                   <th>Birlik</th>
                   <th>Yangilash</th>
@@ -356,6 +400,10 @@ export function ProductManager(): React.ReactElement {
                   <tr key={p.id} style={{ borderBottom: '1px solid var(--border-soft)' }}>
                     <td>{p.name}</td>
                     <td style={{ color: 'var(--accent)' }}>{p.price.toLocaleString('uz-UZ')} so'm</td>
+                    <td>{p.costPrice.toLocaleString('uz-UZ')} so'm</td>
+                    <td style={{ color: p.price - p.costPrice >= 0 ? '#bbf7d0' : '#fecdd3', fontWeight: 700 }}>
+                      {(p.price - p.costPrice).toLocaleString('uz-UZ')} so'm
+                    </td>
                     <td>
                       {p.stock}{' '}
                       {p.stock <= 2 ? <span style={{ color: 'var(--warning)' }}>(kam)</span> : null}
@@ -478,6 +526,7 @@ export function ProductManager(): React.ReactElement {
               <option value="qadoq">Qadoq</option>
               <option value="litr">Litr</option>
               <option value="metr">Metr</option>
+              <option value="kg">Kg</option>
             </select>
           </label>
           <label style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -496,7 +545,24 @@ export function ProductManager(): React.ReactElement {
             />
           </label>
           <label style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <span>Narx (so'm)</span>
+            <span>Tan narxi (so'm)</span>
+            <input
+              type="number"
+              step="0.01"
+              value={editCostPrice}
+              onChange={(e) => setEditCostPrice(e.target.value)}
+              required
+              style={{
+                padding: '10px',
+                borderRadius: '5px',
+                border: '1px solid var(--border)',
+                background: 'var(--surface-3)',
+                color: '#f9fafb'
+              }}
+            />
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <span>Sotuv narxi (so'm)</span>
             <input
               type="number"
               step="0.01"

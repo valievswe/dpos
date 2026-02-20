@@ -9,6 +9,8 @@ type DebtRecord = {
   customerId: number
   customerName: string
   saleId?: number
+  saleTotalCents?: number
+  salePaidCents?: number
   description: string
   debtDate: string
   paymentDate?: string
@@ -57,6 +59,7 @@ export function Debts(): React.ReactElement {
   const [clearing, setClearing] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [deletingDebtId, setDeletingDebtId] = useState<number | null>(null)
+  const [detailDebt, setDetailDebt] = useState<DebtRecord | null>(null)
 
   const tzFormatter = useMemo(
     () =>
@@ -83,6 +86,7 @@ export function Debts(): React.ReactElement {
     const parsed = parseDate(raw)
     return parsed ? tzFormatter.format(parsed) : '-'
   }
+  const formatSom = (cents: number) => `${(Math.round(cents) / 100).toLocaleString('uz-UZ')} so'm`
 
   const dateKey = (raw?: string) => {
     const parsed = parseDate(raw)
@@ -385,11 +389,11 @@ export function Debts(): React.ReactElement {
 
       <div style={{ border: '1px solid var(--border)', borderRadius: '5px', marginTop: 12, overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto' }}>
-          <div style={{ minWidth: 1300 }}>
+          <div style={{ minWidth: 980 }}>
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: '0.7fr 1.2fr 1.2fr 0.9fr 1.2fr 2fr 0.9fr 1.1fr 1fr',
+                gridTemplateColumns: '0.7fr 1.4fr 1.2fr 0.9fr 1fr 1.7fr',
                 padding: '12px 14px',
                 color: 'var(--muted)',
                 fontWeight: 700,
@@ -402,10 +406,7 @@ export function Debts(): React.ReactElement {
               <div>Mijoz</div>
               <div>Qarz sanasi</div>
               <div>Holat</div>
-              <div>To'lov sanasi</div>
-              <div>Mahsulotlar</div>
-              <div>Miqdor</div>
-              <div>Mahsulot jami</div>
+              <div>Qoldiq</div>
               <div>Amallar</div>
             </div>
 
@@ -416,24 +417,12 @@ export function Debts(): React.ReactElement {
                 <div style={{ padding: 16, color: 'var(--muted)' }}>Mos qarz yozuvi topilmadi.</div>
               ) : (
                 pageRows.map((r) => {
-                  const totalQty = r.items.reduce((sum, item) => sum + item.quantity, 0)
-                  const totalProductsCents = r.items.reduce((sum, item) => sum + item.lineTotalCents, 0)
-                  const productInfo =
-                    r.items.length > 0
-                      ? r.items
-                          .map(
-                            (item) =>
-                              `${item.productName} (${(item.unitPriceCents / 100).toLocaleString('uz-UZ')} so'm x ${item.quantity})`
-                          )
-                          .join(', ')
-                      : r.description || '-'
-
                   return (
                     <div
                       key={r.id}
                       style={{
                         display: 'grid',
-                        gridTemplateColumns: '0.7fr 1.2fr 1.2fr 0.9fr 1.2fr 2fr 0.9fr 1.1fr 1fr',
+                        gridTemplateColumns: '0.7fr 1.4fr 1.2fr 0.9fr 1fr 1.7fr',
                         padding: '12px 14px',
                         borderBottom: '1px solid var(--border-soft)',
                         gap: 8,
@@ -458,13 +447,17 @@ export function Debts(): React.ReactElement {
                           {statusLabel(r.status)}
                         </span>
                       </div>
-                      <div>{formatDateTime(r.paymentDate)}</div>
-                      <div style={{ color: '#e5e7eb' }}>{productInfo}</div>
-                      <div>{totalQty.toLocaleString('uz-UZ')}</div>
-                      <div style={{ color: 'var(--accent)', fontWeight: 800 }}>
-                        {(totalProductsCents / 100).toLocaleString('uz-UZ')} so'm
+                      <div style={{ color: '#fef3c7', fontWeight: 700 }}>
+                        {formatSom(r.remainingCents)}
                       </div>
-                      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setDetailDebt(r)}
+                        >
+                          Batafsil
+                        </Button>
                         <Button
                           variant="outline"
                           size="sm"
@@ -492,6 +485,132 @@ export function Debts(): React.ReactElement {
       </div>
 
       <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+
+      <Modal
+        open={!!detailDebt}
+        onClose={() => setDetailDebt(null)}
+        title={detailDebt ? `Qarz #${detailDebt.id} tafsiloti` : ''}
+        width={700}
+      >
+        {detailDebt && (
+          <div style={{ display: 'grid', gap: 12 }}>
+            <div
+              style={{
+                border: '1px solid var(--border)',
+                borderRadius: 5,
+                background: 'var(--surface-3)',
+                padding: 12,
+                display: 'grid',
+                gap: 10
+              }}
+            >
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div>
+                  <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Mijoz</div>
+                  <div style={{ fontWeight: 700 }}>{detailDebt.customerName}</div>
+                </div>
+                <div>
+                  <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Sotuv ID</div>
+                  <div style={{ fontWeight: 700 }}>{detailDebt.saleId ?? '-'}</div>
+                </div>
+                <div>
+                  <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Qarz sanasi</div>
+                  <div>{formatDateTime(detailDebt.debtDate)}</div>
+                </div>
+                <div>
+                  <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>To'lov sanasi</div>
+                  <div>{formatDateTime(detailDebt.paymentDate)}</div>
+                </div>
+              </div>
+            </div>
+
+            <div
+              style={{
+                border: '1px solid var(--border)',
+                borderRadius: 5,
+                background: 'var(--surface-3)',
+                padding: 12,
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                gap: 10
+              }}
+            >
+              <div>
+                <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Sotuv jami</div>
+                <div style={{ fontWeight: 700 }}>
+                  {formatSom(detailDebt.saleTotalCents ?? detailDebt.items.reduce((sum, item) => sum + item.lineTotalCents, 0))}
+                </div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Sotuvda to'langan</div>
+                <div style={{ fontWeight: 700, color: '#bbf7d0' }}>
+                  {formatSom(detailDebt.salePaidCents ?? 0)}
+                </div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Qarzga yozilgan</div>
+                <div style={{ fontWeight: 700, color: 'var(--accent)' }}>{formatSom(detailDebt.totalCents)}</div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Qarzdan to'langan</div>
+                <div style={{ fontWeight: 700, color: '#bbf7d0' }}>{formatSom(detailDebt.paidCents)}</div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Qoldiq</div>
+                <div style={{ fontWeight: 800, color: '#fef3c7' }}>{formatSom(detailDebt.remainingCents)}</div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Holat</div>
+                <div style={{ fontWeight: 700 }}>{statusLabel(detailDebt.status)}</div>
+              </div>
+            </div>
+
+            <div
+              style={{
+                border: '1px solid var(--border)',
+                borderRadius: 5,
+                overflow: 'hidden',
+                background: 'var(--surface-3)'
+              }}
+            >
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '2fr 1fr 1fr',
+                  padding: '10px 12px',
+                  color: 'var(--muted)',
+                  borderBottom: '1px solid var(--border-soft)',
+                  fontWeight: 700
+                }}
+              >
+                <div>Mahsulot</div>
+                <div>Miqdor</div>
+                <div>Jami</div>
+              </div>
+              <div style={{ maxHeight: '30vh', overflowY: 'auto' }}>
+                {detailDebt.items.map((item, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '2fr 1fr 1fr',
+                      padding: '10px 12px',
+                      borderBottom: '1px solid var(--border-soft)'
+                    }}
+                  >
+                    <div style={{ fontWeight: 600 }}>{item.productName}</div>
+                    <div>{item.quantity.toLocaleString('uz-UZ')}</div>
+                    <div style={{ color: 'var(--accent)', fontWeight: 700 }}>{formatSom(item.lineTotalCents)}</div>
+                  </div>
+                ))}
+                {detailDebt.items.length === 0 && (
+                  <div style={{ padding: 12, color: 'var(--muted)' }}>Mahsulot tafsiloti yo'q.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <Modal
         open={!!selectedDebt}

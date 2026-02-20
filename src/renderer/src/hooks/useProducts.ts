@@ -5,6 +5,7 @@ export type Product = {
   sku: string
   name: string
   price: number
+  costPrice: number
   stock: number
   barcode?: string
   unit?: string

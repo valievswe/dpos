@@ -1,7 +1,7 @@
 # Do'kondor API Reference Guide
 
 > **Renderer Access Point:** `window.api` (exposed via `src/preload/index.ts`)
-> **Last Updated:** 2026-02-19
+> **Last Updated:** 2026-02-20
 
 ---
 
@@ -13,6 +13,7 @@ interface Product {
   sku: string
   name: string
   price: number        // so'm, already divided by 100
+  costPrice: number    // tan narxi (so'm), from cost_cents / 100
   stock: number        // stored as REAL in DB (can be fractional)
   barcode?: string
   unit?: string
@@ -24,24 +25,72 @@ interface SalePayload {
   paymentMethod: 'cash' | 'card' | 'mixed' | 'debt'
   discountCents?: number
   customer?: { name: string; phone?: string }
+  paidCents?: number           // required for mixed, in cents
+  paidMethod?: 'cash' | 'card' // required for mixed
 }
 
 interface SaleSummary {
   id: number
   sale_date: string
   total_cents: number
+  paid_cents: number
+  debt_added_cents: number
+  debt_reduced_cents: number
+  debt_cents: number
+  returned_cents: number
+  refund_cents: number
   payment_method: string
   customer_name?: string
   customer_phone?: string
 }
 
 interface SaleItemRow {
+  sale_item_id: number
   product_name: string
   barcode?: string
   unit?: string
   quantity: number
   unit_price_cents: number
   line_total_cents: number
+  returned_qty?: number
+  returnable_qty?: number
+}
+
+interface CreateSaleReturnPayload {
+  saleId: number
+  items: { saleItemId: number; qty: number }[]
+  refundMethod?: 'cash' | 'card'
+  note?: string
+}
+
+interface CreateSaleReturnResult {
+  success: boolean
+  returnId: number
+  totalReturnedCents: number
+  debtReducedCents: number
+  refundCents: number
+  refundMethod?: 'cash' | 'card'
+}
+
+interface SaleReturnItem {
+  productName: string
+  quantity: number
+  unitPriceCents: number
+  lineTotalCents: number
+}
+
+interface SaleReturnRecord {
+  id: number
+  saleId: number
+  customerId?: number
+  customerName: string
+  returnDate: string
+  totalCents: number
+  debtReducedCents: number
+  refundCents: number
+  refundMethod?: 'cash' | 'card'
+  note?: string
+  items: SaleReturnItem[]
 }
 
 interface DeleteProductResult {
@@ -61,6 +110,7 @@ interface UpdateProductPayload {
   sku?: string
   name: string
   price: number
+  costPrice?: number
   unit?: string
   barcode?: string
 }
@@ -96,6 +146,8 @@ interface DebtRecord {
   customerId: number
   customerName: string
   saleId?: number
+  saleTotalCents?: number
+  salePaidCents?: number
   description: string
   debtDate: string
   paymentDate?: string
@@ -150,8 +202,14 @@ interface AnalyticsReport {
   summary: {
     salesCount: number
     totalCents: number
+    returnedCents: number
+    netSalesCents: number
     discountCents: number
     debtCents: number
+    refundCents: number
+    debtReducedByReturnsCents: number
+    grossProfitCents: number
+    netProfitCents: number
     avgCheckCents: number
   }
   previousSummary: null | {
@@ -186,16 +244,18 @@ interface AnalyticsReport {
 | `changePassword(current, next)` | `auth-change-password` | `Promise<boolean>` | Requires active session. |
 | `getProducts()` | `get-products` | `Promise<Product[]>` | Ensures missing barcodes are generated; returns active products sorted by name. |
 | `deleteProduct(productId, force?)` | `delete-product` | `Promise<DeleteProductResult>` | Soft delete with confirmation when history exists. |
-| `addProduct(sku, name, price, unit?, qty?, barcode?)` | `add-product` | `Promise<AddProductResult>` | Auto-generates barcode if missing; may overwrite empty SKU. |
-| `updateProduct(productId, payload)` | `update-product` | `Promise<boolean>` | Updates SKU/name/price/unit/barcode; auto-generates barcode when blank. |
+| `addProduct(sku, name, price, unit?, qty?, barcode?, costPrice?)` | `add-product` | `Promise<AddProductResult>` | Supports both `price` (sotuv narxi) and optional `costPrice` (tan narxi). |
+| `updateProduct(productId, payload)` | `update-product` | `Promise<boolean>` | Updates SKU/name/price/costPrice/unit/barcode; auto-generates barcode when blank. |
 | `findProduct(code)` | `find-product` | `Promise<Product | null>` | **Barcode-only** lookup (no SKU fallback). Does not filter on `active`. |
 | `setStock(productId, qty)` | `set-stock` | `Promise<boolean>` | Logs an `adjustment` in `stock_movements`. |
-| `createSale(payload)` | `create-sale` | `Promise<{ saleId: number; total_cents: number }>` | Transactional checkout. See `mixed` caveat below. |
-| `getSales()` | `get-sales` | `Promise<SaleSummary[]>` | Latest 50 sales by `datetime(sale_date)` descending. |
-| `getSalesAll()` | `get-sales-all` | `Promise<SaleSummary[]>` | Full sales list (no limit). |
-| `getSaleItems(saleId)` | `get-sale-items` | `Promise<SaleItemRow[]>` | Includes `barcode` + `unit` when available. |
+| `createSale(payload)` | `create-sale` | `Promise<{ saleId: number; total_cents: number }>` | Transactional checkout with cash/card/debt/mixed support. |
+| `getSales()` | `get-sales` | `Promise<SaleSummary[]>` | Latest 50 sales with paid/debt/return/refund splits. |
+| `getSalesAll()` | `get-sales-all` | `Promise<SaleSummary[]>` | Full sales list (no limit) with the same financial split fields. |
+| `getSaleItems(saleId)` | `get-sale-items` | `Promise<SaleItemRow[]>` | Includes `sale_item_id`, `barcode`, `unit`, and returnability fields. |
+| `createSaleReturn(payload)` | `create-sale-return` | `Promise<CreateSaleReturnResult>` | Validated return flow: updates stock, debt, and refund ledger atomically. |
+| `getSaleReturns()` | `get-sale-returns` | `Promise<SaleReturnRecord[]>` | Returns grouped return rows with line items. |
 | `clearSalesRecords()` | `clear-sales-records` | `Promise<boolean>` | Deletes sales + sale-linked debts, recalculates customer debt. |
-| `getAnalyticsReport(filter?)` | `get-analytics-report` | `Promise<AnalyticsReport>` | Summary + daily + top products + inventory (period aware). |
+| `getAnalyticsReport(filter?)` | `get-analytics-report` | `Promise<AnalyticsReport>` | Summary now includes returns/refunds and gross/net profit; also returns payments/daily/top/inventory. |
 | `payDebt(customerId, amountCents)` | `pay-debt` | `Promise<boolean>` | Applies payment to oldest open debts. |
 | `getDebts()` | `get-debts` | `Promise<DebtRecord[]>` | Aggregated debt rows with items. |
 | `payDebtRecord(debtId, amountCents)` | `pay-debt-record` | `Promise<PayDebtRecordResult>` | Pays a specific debt row. |
@@ -206,6 +266,7 @@ interface AnalyticsReport {
 | `printReceipt(storeName, items, total)` | `trigger-receipt` | `void` | Legacy, no job ledger. |
 | `printBarcodeByProduct(productId, copies?, printerName?)` | `print-barcode-product` | `Promise<boolean>` | Preferred barcode path, writes `print_jobs`. |
 | `printReceiptBySale(saleId, printerName?)` | `print-receipt-sale` | `Promise<{ success: boolean; error?: string }>` | Preferred receipt path. |
+| `printReturnReceiptById(returnId, printerName?)` | `print-return-receipt` | `Promise<{ success: boolean; error?: string }>` | Prints a return/refund receipt from persisted return data. |
 
 ---
 
@@ -246,7 +307,7 @@ interface AnalyticsReport {
 ### `window.api.getProducts()`
 - **IPC**: `ipcMain.handle('get-products')`
 - **Description**: Returns all active products ordered by `name`. Runs an auto-fix step that generates missing barcodes for any product with an empty barcode field.
-- **Returns**: Products with `price` already converted from cents, `stock` from `qty`.
+- **Returns**: Products with `price` (sotuv narxi) and `costPrice` (tan narxi) already converted from cents, `stock` from `qty`.
 - **Side Effects**: May update `products.barcode` and `updated_at`.
 
 ### `window.api.deleteProduct(productId, force = false)`
@@ -255,13 +316,14 @@ interface AnalyticsReport {
 - **Safety checks**: Counts prior usage in `sale_items` and `stock_movements`; if found and `force` is false, returns `{ success: false, requiresConfirmation: true, saleCount, movementCount }`.
 - **Returns**: `DeleteProductResult` and always echoes historical counts.
 
-### `window.api.addProduct(sku, name, price, unit?, qty?, barcode?)`
+### `window.api.addProduct(sku, name, price, unit?, qty?, barcode?, costPrice?)`
 - **IPC**: `ipcMain.handle('add-product')`
 - **Parameters**:
   - `sku`: Optional; if omitted, a fallback like `P-<timestamp>-<rand>` is generated.
   - `name`: Product label.
-  - `price`: Decimal so'm (renderer sends so'm, main stores cents).
-  - `unit` (optional): `'dona' | 'qadoq' | 'litr' | 'metr'`; anything else coerces to `'dona'`.
+  - `price`: Sotuv narxi, decimal so'm (renderer sends so'm, main stores cents).
+  - `costPrice` (optional): Tan narxi, decimal so'm (`>= 0`), default `0`.
+  - `unit` (optional): `'dona' | 'qadoq' | 'litr' | 'metr' | 'kg'`; anything else coerces to `'dona'`.
   - `qty` (optional): Initial stock; rounded to an integer and clamped to `>= 0`.
   - `barcode` (optional): If provided, is stored and also used as SKU when SKU is empty.
 - **Behavior**:
@@ -272,7 +334,7 @@ interface AnalyticsReport {
 
 ### `window.api.updateProduct(productId, payload)`
 - **IPC**: `ipcMain.handle('update-product')`
-- **Validation**: Ensures `name` is non-empty and `price` is a finite non-negative number.
+- **Validation**: Ensures `name` is non-empty, `price` is finite non-negative, and `costPrice` (if sent) is finite non-negative.
 - **Unit Handling**: Same whitelist as `addProduct`.
 - **Barcode Handling**: If barcode is blank/undefined, the handler auto-generates one after update.
 - **Returns**: `true` on success; throws for invalid data.
@@ -297,28 +359,62 @@ interface AnalyticsReport {
 - **Validation**:
   - `payload.items` must be non-empty.
   - Every product must exist and have sufficient stock.
-  - Debt payments require `payload.customer.name`.
+  - Debt and mixed payments require `payload.customer.name`.
+  - Mixed payments require `payload.paidCents` where `0 < paidCents < total`.
 - **Side Effects** (single transaction):
   1. Optional customer lookup/creation (deduplicates by phone when provided).
   2. Subtotal calculation (price * qty), discount clamped to subtotal, tax = 0.
   3. Insert into `sales` (date stored as Tashkent time string).
   4. Insert `sale_items`, decrement product stock, append `stock_movements` with `movement_type = 'sale'`.
   5. If `paymentMethod === 'debt'`: insert `debt_transactions`, increment `customers.debt_cents`, create `debts` row.
-  6. Otherwise: insert into `payments`.
+  6. If `paymentMethod === 'mixed'`: insert a `payments` row for the paid portion (`paidMethod`, `paidCents`) and create debt rows for the remainder.
+  7. Otherwise (`cash`/`card`): insert full amount into `payments`.
 - **Returns**: `{ saleId, total_cents }`.
-- **Important**: The `payments.method` column only accepts `cash` or `card`. Passing `paymentMethod: 'mixed'` will violate the DB constraint and throw.
 
 ### `window.api.getSales()`
 - **IPC**: `ipcMain.handle('get-sales')`
-- **Description**: Fetches the latest 50 sales joined with optional customer name + phone. Ordered by `datetime(sale_date)`.
+- **Description**: Fetches the latest 50 sales joined with optional customer name + phone.
+- **Includes**:
+  - `paid_cents`: total payment rows recorded for the sale.
+  - `debt_added_cents`: sale paytida qarzga yozilgan dastlabki summa.
+  - `debt_reduced_cents`: qaytishlarda qarzdan kamaygan summa.
+  - `returned_cents`: sum of linked return rows.
+  - `refund_cents`: customerga real qaytarilgan summa (kassa chiqimi).
+  - `debt_cents`: current outstanding debt for this sale (uses debt ledger if present, otherwise computes fallback from sale/payment/returns).
+- **Order**: `datetime(sale_date) DESC`.
 
 ### `window.api.getSalesAll()`
 - **IPC**: `ipcMain.handle('get-sales-all')`
-- **Description**: Fetches the full sales list with customer join. Ordered by `datetime(sale_date)`.
+- **Description**: Same shape as `getSales()`, but without limit (includes debt/refund split fields).
 
 ### `window.api.getSaleItems(saleId)`
 - **IPC**: `ipcMain.handle('get-sale-items')`
-- **Description**: Returns items with `barcode`, `unit`, `quantity`, and pricing data for the specified sale.
+- **Description**: Returns sale items with return metadata.
+- **Includes**:
+  - `sale_item_id`
+  - `returned_qty`
+  - `returnable_qty`
+  - `barcode`, `unit`, `quantity`, and pricing fields.
+
+### `window.api.createSaleReturn(payload)`
+- **IPC**: `ipcMain.handle('create-sale-return')`
+- **Payload**: `{ saleId, items: [{ saleItemId, qty }], refundMethod?, note? }`
+- **Validation**:
+  - Sale must exist.
+  - At least one return item with positive qty.
+  - Cannot return more than remaining returnable qty per sale item.
+- **Atomic behavior**:
+  1. Insert `sale_returns` header row.
+  2. Insert `sale_return_items` detail rows.
+  3. Increase stock for each returned product.
+  4. Log stock movements with `movement_type = 'return'`.
+  5. Reduce debt first (if sale has open debt), then mark remaining amount as refund (`cash`/`card`).
+- **Returns**: `{ success, returnId, totalReturnedCents, debtReducedCents, refundCents, refundMethod? }`.
+
+### `window.api.getSaleReturns()`
+- **IPC**: `ipcMain.handle('get-sale-returns')`
+- **Description**: Returns grouped return records with customer info and line items.
+- **Includes**: `totalCents`, `debtReducedCents`, `refundCents`, `refundMethod`, `note`, and item list.
 
 ### `window.api.clearSalesRecords()`
 - **IPC**: `ipcMain.handle('clear-sales-records')`
@@ -336,7 +432,11 @@ interface AnalyticsReport {
 
 ### `window.api.getDebts()`
 - **IPC**: `ipcMain.handle('get-debts')`
-- **Description**: Returns grouped debt rows with items from `sale_items`. Includes status, totals, and the last payment timestamp.
+- **Description**: Returns grouped debt rows with items from `sale_items`.
+- **Includes**:
+  - status + totals (`totalCents`, `paidCents`, `remainingCents`)
+  - `saleTotalCents` and `salePaidCents` when linked to a sale
+  - last payment timestamp.
 
 ### `window.api.payDebtRecord(debtId, amountCents)`
 - **IPC**: `ipcMain.handle('pay-debt-record')`
@@ -362,6 +462,7 @@ interface AnalyticsReport {
 - **Filter**: `{ from?: 'YYYY-MM-DD', to?: 'YYYY-MM-DD' }`. Invalid dates are ignored.
 - **Description**:
   - Provides period summary + payment split + daily totals + top products + inventory performance.
+  - Summary includes: `returnedCents`, `netSalesCents`, `refundCents`, `debtReducedByReturnsCents`, `grossProfitCents`, `netProfitCents`.
   - When both `from` and `to` are set, computes a previous-period comparison of equal length.
   - Inventory rows include stock, min stock, and sales totals within the selected period.
 - **Returns**: `AnalyticsReport`.
@@ -410,6 +511,15 @@ interface AnalyticsReport {
   6. Updates the job status to `done` or `failed`.
 - **Returns**: `{ success: true }` or `{ success: false, error }`.
 
+### `window.api.printReturnReceiptById(returnId, printerName?)`
+- **IPC**: `ipcMain.handle('print-return-receipt')`
+- **Steps**:
+  1. Loads return header from `sale_returns`.
+  2. Loads return items from `sale_return_items`.
+  3. Formats return receipt payload and writes `print_jobs` queue row.
+  4. Executes receipt binary and updates job status to `done` or `failed`.
+- **Returns**: `{ success: true }` or `{ success: false, error }`.
+
 ### `window.api.printReceipt(storeName, items, total)` *(legacy)*
 - **IPC**: `ipcMain.on('trigger-receipt')`
 - **Notes**: Does not interact with `print_jobs` or sale data. Prefer `printReceiptBySale`.
@@ -419,10 +529,10 @@ interface AnalyticsReport {
 ## Error Handling
 
 - All `ipcRenderer.invoke` calls propagate thrown errors as rejected Promises. Wrap calls in `try/catch` and display human-friendly strings.
-- `addProduct` returns `{ success: false }` on DB errors (no throw). `updateProduct`, `setStock`, `createSale`, and auth/debt handlers throw on validation/DB errors.
+- `addProduct` returns `{ success: false }` on DB errors (no throw). `updateProduct`, `setStock`, `createSale`, `createSaleReturn`, and auth/debt handlers throw on validation/DB errors.
 - `deleteProduct` never throws; it returns `{ success: false }` when the product is missing.
 - Printer APIs return structured responses only for the job-based methods. Legacy `printBarcode` and `printReceipt` have no completion signal beyond main-process logs.
-- `printBarcodeByProduct` rejects on failure. `printReceiptBySale` catches failures and returns `{ success: false, error }` instead of rejecting in normal error paths.
+- `printBarcodeByProduct` rejects on failure. `printReceiptBySale` and `printReturnReceiptById` catch failures and return `{ success: false, error }` instead of rejecting in normal error paths.
 
 ---
 
@@ -443,6 +553,7 @@ When returning data to the renderer, prefer serializable POJOs (no `Database` ob
 |---------|-----------|--------|-----|
 | Barcode printing | `printBarcodeByProduct` | `printBarcode` | Adds DB queue + retry info. |
 | Receipt printing | `printReceiptBySale` | `printReceipt` | Uses stored sale data; returns success flag. |
+| Return receipt printing | `printReturnReceiptById` | *(none)* | Uses persisted return/debt/refund data. |
 
 ---
 
@@ -460,7 +571,15 @@ useEffect(() => {
 
 // Add product form submission
 const submit = async () => {
-  const res = await window.api.addProduct('', name.trim(), parseFloat(price), unit, qty, barcode || undefined)
+  const res = await window.api.addProduct(
+    '',
+    name.trim(),
+    parseFloat(sellPrice),
+    unit,
+    qty,
+    barcode || undefined,
+    parseFloat(costPrice || '0')
+  )
   if (!res.success) {
     setError('Mahsulot qo\'shilmadi')
     return
@@ -471,7 +590,8 @@ const submit = async () => {
 // Update product
 await window.api.updateProduct(productId, {
   name: editName.trim(),
-  price: parseFloat(editPrice),
+  price: parseFloat(editSellPrice),
+  costPrice: parseFloat(editCostPrice || '0'),
   unit: editUnit,
   barcode: editBarcode || undefined
 })
@@ -482,7 +602,9 @@ try {
     items: cart.map((line) => ({ productId: line.product.id, qty: line.qty })),
     paymentMethod,
     discountCents: Math.round(discount * 100),
-    customer: paymentMethod === 'debt' ? { name: custName, phone: custPhone || undefined } : undefined
+    customer: paymentMethod === 'debt' || paymentMethod === 'mixed' ? { name: custName, phone: custPhone || undefined } : undefined,
+    paidCents: paymentMethod === 'mixed' ? Math.round(partialPaidSom * 100) : undefined,
+    paidMethod: paymentMethod === 'mixed' ? 'cash' : undefined
   })
   setNotice(`Sotuv #${result.saleId} yakunlandi`)
 } catch (err: any) {
@@ -491,7 +613,7 @@ try {
 
 // Analytics report
 const report = await window.api.getAnalyticsReport({ from: '2026-02-01', to: '2026-02-15' })
-console.log(report.summary.totalCents)
+console.log(report.summary.netSalesCents, report.summary.netProfitCents)
 ```
 
 ---
@@ -517,8 +639,10 @@ All handlers live in `src/main/ipc/index.ts`. Search for the channel string to i
 | `get-sales` | Sales summary (latest 50) |
 | `get-sales-all` | Sales summary (all) |
 | `get-sale-items` | Sale line items |
+| `create-sale-return` | Sale-linked return/refund transaction |
+| `get-sale-returns` | Return/refund history list |
 | `clear-sales-records` | Clears sales + sale-linked debts |
-| `get-analytics-report` | Summary + inventory analytics |
+| `get-analytics-report` | Summary (returns/refunds/profit) + payments/daily/top/inventory analytics |
 | `pay-debt` | Apply payment to oldest debts |
 | `get-debts` | Debt list with items |
 | `pay-debt-record` | Pay specific debt row |
@@ -529,7 +653,8 @@ All handlers live in `src/main/ipc/index.ts`. Search for the channel string to i
 | `trigger-receipt` | Legacy receipt |
 | `print-barcode-product` | Job-backed barcode |
 | `print-receipt-sale` | Job-backed receipt |
+| `print-return-receipt` | Job-backed return receipt |
 
 ---
 
-This guide captures the full renderer-facing API surface as of 2026-02-19.
+This guide captures the full renderer-facing API surface as of 2026-02-20.

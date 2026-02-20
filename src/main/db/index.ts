@@ -73,6 +73,28 @@ CREATE TABLE IF NOT EXISTS sale_items (
   profit_cents INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS sale_returns (
+  id INTEGER PRIMARY KEY,
+  sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+  customer_id INTEGER REFERENCES customers(id),
+  total_cents INTEGER NOT NULL,
+  debt_reduced_cents INTEGER NOT NULL DEFAULT 0,
+  refund_method TEXT CHECK (refund_method IN ('cash','card')),
+  refund_cents INTEGER NOT NULL DEFAULT 0,
+  note TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS sale_return_items (
+  id INTEGER PRIMARY KEY,
+  return_id INTEGER NOT NULL REFERENCES sale_returns(id) ON DELETE CASCADE,
+  sale_item_id INTEGER NOT NULL REFERENCES sale_items(id) ON DELETE CASCADE,
+  product_id INTEGER NOT NULL REFERENCES products(id),
+  quantity REAL NOT NULL,
+  unit_price_cents INTEGER NOT NULL,
+  line_total_cents INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS payments (
   id INTEGER PRIMARY KEY,
   sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
@@ -136,6 +158,8 @@ CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
 CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
 CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(sale_date);
 CREATE INDEX IF NOT EXISTS idx_sale_items_product ON sale_items(product_id);
+CREATE INDEX IF NOT EXISTS idx_sale_returns_sale ON sale_returns(sale_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_sale_return_items_sale_item ON sale_return_items(sale_item_id);
 CREATE INDEX IF NOT EXISTS idx_stock_product_date ON stock_movements(product_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
 CREATE INDEX IF NOT EXISTS idx_debts_customer ON debts(customer_id, is_paid);
@@ -172,6 +196,7 @@ export function initializeDatabase(): Database.Database {
   // 2) Migrate legacy columns (old products without barcode, etc.)
   migrateLegacyProducts(db)
   migrateLegacyDebtColumns(db)
+  migrateLegacyAppUsersRoleConstraint(db)
   // 3) Indexes/triggers after columns exist
   db.exec(INDEXES_AND_TRIGGERS)
 
@@ -190,6 +215,7 @@ export function mapProductRow(row: any) {
     sku: row.sku,
     name: row.name,
     price: row.price_cents / 100,
+    costPrice: (row.cost_cents ?? 0) / 100,
     stock: row.qty,
     barcode: row.barcode,
     unit: row.unit,
@@ -256,4 +282,48 @@ function migrateLegacyDebtColumns(database: Database.Database) {
       AND description LIKE 'Sotuv #%'
       AND INSTR(description, '#') > 0;
   `)
+}
+
+function migrateLegacyAppUsersRoleConstraint(database: Database.Database) {
+  const row = database
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'app_users'")
+    .get() as { sql?: string } | undefined
+  const tableSql = row?.sql ?? ''
+  if (!tableSql) return
+
+  const hasOwnerOnlyConstraint = /CHECK\s*\(\s*role\s+IN\s*\(\s*'owner'\s*\)\s*\)/i.test(tableSql)
+  if (!hasOwnerOnlyConstraint) return
+
+  const migrate = database.transaction(() => {
+    database.exec(`
+      CREATE TABLE app_users_new (
+        id INTEGER PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE,
+        role TEXT NOT NULL CHECK (role IN ('Do''kondor','owner')),
+        password_salt TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      INSERT INTO app_users_new (id, username, role, password_salt, password_hash, created_at, updated_at)
+      SELECT
+        id,
+        username,
+        CASE
+          WHEN role = 'Do''kondor' THEN 'Do''kondor'
+          ELSE 'owner'
+        END,
+        password_salt,
+        password_hash,
+        created_at,
+        updated_at
+      FROM app_users;
+
+      DROP TABLE app_users;
+      ALTER TABLE app_users_new RENAME TO app_users;
+    `)
+  })
+
+  migrate()
 }

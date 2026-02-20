@@ -1,7 +1,7 @@
-# Do'kondor - POS System Codebase Documentation
+Ôªø# Do'kondor - POS System Codebase Documentation
 
 > **AI-Friendly Reference**
-> Last Updated: 2026-02-19
+> Last Updated: 2026-02-20
 > Version: 2.0.0
 
 ---
@@ -26,10 +26,12 @@
 
 **Do'kondor** is an offline-first Electron POS tailored for Uzbek retail stores. It combines a SQLite (better-sqlite3) data layer, barcode and receipt printing through bundled executables, and a React-based selling experience. Key capabilities:
 
-- Inventory onboarding with unit selection, barcode auto-generation, and stock adjustments.
+- Inventory onboarding with both tan narxi (cost price) and sotuv narxi (sell price), plus barcode auto-generation.
 - Authenticated access (single owner user) with password setup, login, and change-password flow.
 - Fast cart building from barcode scans or search, including debt sales tied to customers.
 - Sales ledger with reprints, date range filters, and Excel export.
+- Sale-linked return/refund flow with debt-first adjustment and stock rollback.
+- Dedicated returns history with return receipt printing.
 - Debt ledger with per-debt payments, deletion, and full export/clear flows.
 - Analytics dashboard plus warehouse (inventory) report with period-based summaries.
 - Print job journaling for both barcode and receipt printers.
@@ -45,7 +47,7 @@
 |------|----------|------------------|
 | **Main process** | `src/main` | Window lifecycle, SQLite access, transactional sales logic, IPC handlers, auth session, analytics reporting, printer orchestration, Excel export. |
 | **Preload** | `src/preload` | Context isolation bridge that exposes a curated `window.api` surface to the renderer. |
-| **Renderer** | `src/renderer` | React UI (AuthGate, Sales, Inventory, History, Debts, Analytics, Warehouse report, Security settings). |
+| **Renderer** | `src/renderer` | React UI (AuthGate, Sales, Inventory, Sales History, Refund, Returns History, Debts, Analytics, Warehouse report, Security settings). |
 
 ### Runtime Flow
 
@@ -71,13 +73,13 @@ graph TD
 ```
 src/
 +- main/
-¶  +- index.ts              # Electron bootstrap + lifecycle hooks
-¶  +- db/index.ts           # SQLite setup, migrations, helpers
-¶  +- ipc/index.ts          # All IPC handlers and business logic
-¶  L- services/printers.ts  # Wrapper over barcode/receipt executables
+¬¶  +- index.ts              # Electron bootstrap + lifecycle hooks
+¬¶  +- db/index.ts           # SQLite setup, migrations, helpers
+¬¶  +- ipc/index.ts          # All IPC handlers and business logic
+¬¶  L- services/printers.ts  # Wrapper over barcode/receipt executables
 +- preload/
-¶  +- index.ts              # contextBridge exposure of API surface
-¶  L- index.d.ts            # Global window typings for renderer
+¬¶  +- index.ts              # contextBridge exposure of API surface
+¬¶  L- index.d.ts            # Global window typings for renderer
 L- renderer/
    +- index.html
    L- src/
@@ -86,16 +88,17 @@ L- renderer/
       +- hooks/useProducts.ts
       +- lib/classNames.ts
       +- components/
-      ¶  +- AuthGate.tsx
-      ¶  +- Sidebar.tsx
-      ¶  +- SalesPage.tsx
-      ¶  +- ProductManager.tsx
-      ¶  +- SalesHistory.tsx
-      ¶  +- Debts.tsx
-      ¶  +- AnalysisPage.tsx
-      ¶  +- OmborReportPage.tsx
-      ¶  +- SecuritySettings.tsx
-      ¶  L- ui/ (Button, Modal, Pagination, DateRangeFilter, etc.)
+      ¬¶  +- AuthGate.tsx
+      ¬¶  +- Sidebar.tsx
+      ¬¶  +- SalesPage.tsx
+      ¬¶  +- ProductManager.tsx
+      ¬¶  +- SalesHistory.tsx
+      ¬¶  +- ReturnsHistory.tsx
+      ¬¶  +- Debts.tsx
+      ¬¶  +- AnalysisPage.tsx
+      ¬¶  +- OmborReportPage.tsx
+      ¬¶  +- SecuritySettings.tsx
+      ¬¶  L- ui/ (Button, Modal, Pagination, DateRangeFilter, etc.)
       +- styles/ (CSS variables + global styles)
 ```
 
@@ -120,7 +123,7 @@ Supporting files:
 - Creates and migrates tables for products, customers, app_users, sales, sale_items, payments, stock_movements, debts, debt_transactions, and print_jobs.
 - `migrateLegacyProducts()` inspects schema via `PRAGMA table_info` to backfill new columns (barcode, cents fields, timestamps) without dropping data.
 - `migrateLegacyDebtColumns()` backfills `debts.sale_id` and `debts.paid_at`, and auto-maps legacy `description` strings like `Sotuv #123`.
-- `mapProductRow()` normalizes DB rows to renderer expectations (price in so'm, qty => stock, includes `min_stock`).
+- `mapProductRow()` normalizes DB rows to renderer expectations (`price` + `costPrice` in so'm, `qty => stock`, includes `min_stock`).
 
 ### IPC Handlers (`src/main/ipc/index.ts`)
 Handlers are registered once on app start. Highlights:
@@ -132,17 +135,19 @@ Handlers are registered once on app start. Highlights:
 - **Inventory**:
   - `get-products` returns only active rows (`active = 1`) and auto-generates missing barcodes before returning data.
   - `delete-product` performs a soft delete and surfaces historical `sale_items` / `stock_movements` counts; requires an explicit `force` when history exists.
-  - `add-product` enforces a unit whitelist (`dona|qadoq|litr|metr`), rounds price to cents, clamps initial qty to a non-negative integer, and can auto-generate barcode + SKU.
-  - `update-product` validates fields and updates SKU/name/price/unit/barcode; if barcode is blank, it is auto-generated.
+  - `add-product` enforces a unit whitelist (`dona|qadoq|litr|metr|kg`), rounds `price`/`costPrice` to cents, clamps initial qty to a non-negative integer, and can auto-generate barcode + SKU.
+  - `update-product` validates fields and updates SKU/name/price/costPrice/unit/barcode; if barcode is blank, it is auto-generated.
   - `find-product` looks up **barcode only** and does not filter on `active = 1`.
   - `set-stock` logs an `adjustment` entry in `stock_movements` with old/new qty.
 - **Sales**:
   - `create-sale` enforces stock availability, deduplicates customers by phone when provided, computes totals/discount/tax, writes `sales`, `sale_items`, and inventory movements in a single transaction.
   - `sales.payment_method` accepts `cash|card|mixed|debt` in the schema, but `payments.method` only accepts `cash|card`.
 - **Ledger**:
-  - `get-sales` returns the latest 50 sales with customer name and phone.
-  - `get-sales-all` returns all sales.
-  - `get-sale-items` fetches line items with unit/barcode.
+  - `get-sales` returns the latest 50 sales with payment/debt/return/refund split (`paid_cents`, `debt_added_cents`, `debt_reduced_cents`, `debt_cents`, `returned_cents`, `refund_cents`).
+  - `get-sales-all` returns all sales with the same financial split fields.
+  - `get-sale-items` fetches line items with unit/barcode and returnability (`sale_item_id`, `returned_qty`, `returnable_qty`).
+  - `create-sale-return` validates per-line return quantities, writes return ledger rows, updates stock, applies debt reduction first, and records refund remainder.
+  - `get-sale-returns` returns grouped return records with customer + line items.
   - `clear-sales-records` removes all sales and any sale-linked debt rows, then recalculates `customers.debt_cents`.
 - **Debt**:
   - `pay-debt` applies payments to the oldest open debts for a customer.
@@ -151,17 +156,18 @@ Handlers are registered once on app start. Highlights:
   - `delete-debt-record` removes a debt row and rebalances customer debt.
   - `clear-debts-records` clears all debt + debt_transactions data.
 - **Analytics**:
-  - `get-analytics-report` provides summary totals, payment split, daily totals, top products, and inventory rollups for an optional `from/to` range.
+  - `get-analytics-report` provides summary totals, returns/refunds, gross/net profit, payment split, daily totals, top products, and inventory rollups for an optional `from/to` range.
   - When a date range is supplied, it also returns a previous-period comparison of equal length.
 - **Export**:
   - `export-sales-excel` opens a save dialog and writes an `.xlsx` file using the provided headers + rows.
 - **Printing**:
-  - `trigger-print`/`trigger-receipt` support legacy fire-and-forget flows, while `print-barcode-product` and `print-receipt-sale` ensure a `print_jobs` ledger row per attempt and return success/failure to the renderer.
+  - `trigger-print`/`trigger-receipt` support legacy fire-and-forget flows, while `print-barcode-product`, `print-receipt-sale`, and `print-return-receipt` ensure a `print_jobs` ledger row per attempt and return success/failure to the renderer.
 
 ### Printer Service (`src/main/services/printers.ts`)
 - Resolves executable path depending on `app.isPackaged`; in dev it falls back to `resources/bin` under repo root and surfaces missing-binary errors early for barcode labels.
 - `printLabelByProduct` lazily generates an EAN-8 barcode when none exists, accepts `printerName`, logs to `print_jobs`, and runs `label.exe` `copies` times.
 - `printReceiptBySale` rehydrates sale totals + items, formats `name|qty|unit_price|line_total`, inserts a queued job, and executes `receipt2.exe` (fallback: `receipt.exe`).
+- `printReturnReceiptById` loads `sale_returns` + `sale_return_items`, formats a return-specific receipt payload, inserts a queued job, and executes the same receipt binary.
 - Both methods update `print_jobs.status` to `done` or `failed` with `error` text for observability.
 
 ### Preload Bridge (`src/preload/index.ts`)
@@ -180,12 +186,12 @@ Handlers are registered once on app start. Highlights:
 4. `SecuritySettings` allows the owner to change password or log out.
 
 ### Inventory Lifecycle
-1. Clerk opens the add-product modal and enters name/price/unit/initial qty; barcode is optional.
+1. Clerk opens the add-product modal and enters name, tan narxi, sotuv narxi, unit, and initial qty; barcode is optional.
 2. Renderer calls `window.api.addProduct` and receives `{ productId, barcode }` on success.
 3. If barcode was empty, the system generates an EAN-8 barcode and, when SKU was missing, sets SKU to the new barcode.
 4. Stock adjustments use `set-stock`, logging every change into `stock_movements` with before/after qty.
 5. Barcode labels are requested with `printBarcodeByProduct`, which queues a print job and executes `label.exe`.
-6. Product edits use `updateProduct` to change name/price/unit/barcode and auto-fill a barcode when blank.
+6. Product edits use `updateProduct` to change name/tan narxi/sotuv narxi/unit/barcode and auto-fill a barcode when blank.
 
 ### Sales & Debt Workflow
 1. `SalesPage` builds a cart from barcode scans or search suggestions.
@@ -196,11 +202,25 @@ Handlers are registered once on app start. Highlights:
 6. Outstanding customer balance can be reduced via `pay-debt` (oldest-first) or `pay-debt-record` (specific debt).
 
 ### Sales History, Filters, and Excel Export
-- `SalesHistory` fetches the 50 most recent sales for quick review, with client-side filters (payment type, text search, date range) and pagination.
+- `SalesHistory` runs in two modes:
+  - **History mode** (`Sotuv tarixi`): review, filter, reprint, export, optional clear.
+  - **Refund mode** (`Qaytarish`): sale lookup + controlled return modal (no clear/export actions).
+- Both modes fetch the 50 most recent sales for quick review, with client-side filters (payment type, text search, date range) and pagination.
 - Selecting a sale triggers `get-sale-items` to display line-level totals in a modal.
-- Clicking ìChek chiqarishî invokes `printReceiptBySale`, which reuses persisted sale data instead of recomputing totals in the renderer.
-- ìExcel eksportî gathers sale items per sale and calls `exportSalesExcel`, which prompts for a file path and writes the `.xlsx` file.
-- ìSotuvlarni tozalashî calls `clearSalesRecords` after the user confirms.
+- Sale detail cards separate `dastlabki qarz`, `hozirgi qarz`, `qaytishda qarzdan yechilgan`, and `mijozga qaytarilgan` so owner/cashier responsibilities are clear.
+- Clicking ‚ÄúChek chiqarish‚Äù invokes `printReceiptBySale`, which reuses persisted sale data instead of recomputing totals in the renderer.
+- ‚ÄúExcel eksport‚Äù gathers sale items per sale and calls `exportSalesExcel`, which prompts for a file path and writes the `.xlsx` file.
+- ‚ÄúSotuvlarni tozalash‚Äù calls `clearSalesRecords` after the user confirms.
+
+### Refund & Returns Workflow
+1. Cashier opens `Qaytarish` and selects the original sale.
+2. Renderer loads returnable quantities per sale line (`get-sale-items` with `returnable_qty`).
+3. Cashier enters return quantities and refund method, then submits `create-sale-return`.
+4. Main transaction:
+   - writes `sale_returns` / `sale_return_items`,
+   - increases stock and logs `stock_movements(type='return')`,
+   - reduces debt first, then marks remaining amount as refund.
+5. Returns are listed in `Qaytishlar tarixi` via `get-sale-returns` and can be printed via `print-return-receipt`.
 
 ### Debts: List, Pay, Export, Clear
 - `Debts` uses `getDebts` to show grouped debt rows with line items, status, and totals.
@@ -209,8 +229,9 @@ Handlers are registered once on app start. Highlights:
 - Excel exports re-use `exportSalesExcel` with debt-specific headers.
 
 ### Analytics & Warehouse Reports
-- `AnalysisPage` calls `getAnalyticsReport` to show summary totals, payment split, daily revenue, and top products.
+- `AnalysisPage` calls `getAnalyticsReport` to show summary totals, returns/refunds, debt effects, gross/net profit, payment split, and top products.
 - A two-month comparison loads two separate reports (month A vs month B) from the same analytics endpoint.
+- UI presents the key analytics blocks as tables (not bars) for easier owner review.
 - `OmborReportPage` uses `getAnalyticsReport` inventory data to show stock, min stock, and period sales by product.
 - Both reports include Excel exports using `exportSalesExcel`.
 
@@ -225,6 +246,8 @@ Handlers are registered once on app start. Highlights:
 | `app_users` | Single owner credentials. | `username` (unique), `role` (`Do'kondor`), `password_salt`, `password_hash`, timestamps. |
 | `sales` | Sale headers. | `customer_id`, `sale_date` (Tashkent time), subtotal/discount/tax/total cents, `payment_method` (`cash|card|mixed|debt`), `note`. |
 | `sale_items` | Line-level detail. | `sale_id` FK, `product_id`, `product_name`, `barcode`, `quantity`, `unit_price_cents`, `cost_cents`, `line_total_cents`, `profit_cents`. |
+| `sale_returns` | Return/refund header per sale operation. | `sale_id`, `customer_id`, `total_cents`, `debt_reduced_cents`, `refund_method`, `refund_cents`, `note`, `created_at`. |
+| `sale_return_items` | Return line detail mapped to original sale lines. | `return_id`, `sale_item_id`, `product_id`, `quantity`, `unit_price_cents`, `line_total_cents`. |
 | `payments` | Cash/card settlement history. | `sale_id`, `method` (`cash`/`card`), `amount_cents`. |
 | `stock_movements` | Audit trail for all qty changes. | `movement_type` (`initial|receive|sale|return|adjustment`), `quantity_change`, `old_qty`, `new_qty`, pricing context, timestamps. |
 | `debts` | Snapshot of outstanding balances per sale. | `customer_id`, `sale_id`, `description`, `total_cents`, `paid_cents`, `is_paid`, `due_date`, `paid_at`, `created_at`. |
@@ -234,7 +257,7 @@ Handlers are registered once on app start. Highlights:
 Soft deletes: Products are deactivated by setting `active = 0`; `get-products` filters on this flag while historical references remain intact.
 
 Indexes & triggers (see `INDEXES_AND_TRIGGERS` string):
-- Search helpers: products by `barcode` and `name`, sales by date, sale items by product, stock movements by product+date, customers by phone, debts by customer+status.
+- Search helpers: products by `barcode` and `name`, sales by date, sale items by product, sale returns by sale/date, return items by sale item, stock movements by product+date, customers by phone, debts by customer+status.
 - Update triggers keep `products.updated_at`, `customers.updated_at`, and `app_users.updated_at` fresh after every update.
 
 Money handling: All monetary values are stored as integer cents to avoid floating point drift. Renderer converts back to so'm via division by 100.
@@ -252,16 +275,18 @@ Money handling: All monetary values are stored as integer cents to avoid floatin
 | `window.api.changePassword(...)` | `auth-change-password` | same | Updates owner password. |
 | `window.api.getProducts()` | `get-products` | same | Returns active products sorted by name, auto-fills missing barcodes. |
 | `window.api.deleteProduct(id, force?)` | `delete-product` | same | Soft delete; when history exists returns counts and `requiresConfirmation` until forced. |
-| `window.api.addProduct(sku, name, price, unit?, qty?, barcode?)` | `add-product` | same | Price converted to cents; unit coerced to whitelist; qty rounded and clamped to 0+. |
-| `window.api.updateProduct(productId, payload)` | `update-product` | same | Updates SKU/name/price/unit/barcode and auto-generates barcode if blank. |
+| `window.api.addProduct(sku, name, price, unit?, qty?, barcode?, costPrice?)` | `add-product` | same | `price` + optional `costPrice` converted to cents; unit coerced to whitelist; qty rounded and clamped to 0+. |
+| `window.api.updateProduct(productId, payload)` | `update-product` | same | Updates SKU/name/price/costPrice/unit/barcode and auto-generates barcode if blank. |
 | `window.api.findProduct(code)` | `find-product` | same | Barcode-only lookup. |
 | `window.api.setStock(productId, qty)` | `set-stock` | same | Wraps movement logging transaction. |
 | `window.api.createSale(payload)` | `create-sale` | same | Transactional checkout; returns `{ saleId, total_cents }`. |
-| `window.api.getSales()` | `get-sales` | same | Latest 50 rows with customer join. |
-| `window.api.getSalesAll()` | `get-sales-all` | same | All sales rows with customer join. |
-| `window.api.getSaleItems(saleId)` | `get-sale-items` | same | Returns product_name, barcode, unit, quantity, pricing info. |
+| `window.api.getSales()` | `get-sales` | same | Latest 50 rows with paid + debt-added + debt-reduced + outstanding debt + returned + refund split fields. |
+| `window.api.getSalesAll()` | `get-sales-all` | same | All sales rows with the same financial split fields. |
+| `window.api.getSaleItems(saleId)` | `get-sale-items` | same | Returns sale-item id + returnability fields + pricing info. |
+| `window.api.createSaleReturn(payload)` | `create-sale-return` | same | Sale-linked return transaction with stock/debt/refund updates. |
+| `window.api.getSaleReturns()` | `get-sale-returns` | same | Grouped return history with line items. |
 | `window.api.clearSalesRecords()` | `clear-sales-records` | same | Clears sales + sale-linked debts, recalculates customer debt. |
-| `window.api.getAnalyticsReport(...)` | `get-analytics-report` | same | Summary + daily + top products + inventory. |
+| `window.api.getAnalyticsReport(...)` | `get-analytics-report` | same | Summary (returns/refunds/profit included) + daily + top products + inventory. |
 | `window.api.payDebt(customerId, amountCents)` | `pay-debt` | same | Logs payment and updates open debts. |
 | `window.api.getDebts()` | `get-debts` | same | Aggregated debts with items. |
 | `window.api.payDebtRecord(debtId, amountCents)` | `pay-debt-record` | same | Pays a specific debt row. |
@@ -272,6 +297,7 @@ Money handling: All monetary values are stored as integer cents to avoid floatin
 | `window.api.printReceipt(...)` | `trigger-receipt` | same | Legacy fire-and-forget. |
 | `window.api.printBarcodeByProduct(productId, copies?, printerName?)` | `print-barcode-product` | same | Inserts `print_jobs` row, resolves binary path, runs binary. |
 | `window.api.printReceiptBySale(saleId, printerName?)` | `print-receipt-sale` | same | Returns `{ success, error? }`. |
+| `window.api.printReturnReceiptById(returnId, printerName?)` | `print-return-receipt` | same | Prints receipt from persisted return rows. |
 
 Every invoke-based handler propagates thrown errors to the renderer (caught as rejected Promise). Caller components display friendly messages around these failures.
 
@@ -286,10 +312,11 @@ Every invoke-based handler propagates thrown errors to the renderer (caught as r
 | `SecuritySettings` | `components/SecuritySettings.tsx` | Change password + logout actions. |
 | `Sidebar` | `components/Sidebar.tsx` | Navigation + collapse control, displays app title. |
 | `SalesPage` | `components/SalesPage.tsx` | Cart UX, barcode scanning, search suggestions, checkout with discount, payment mode (cash/card/debt), optional receipt prompt post-sale. |
-| `ProductManager` | `components/ProductManager.tsx` | Create/edit products, update stock, soft delete, barcode printing with printer selection, and paginated listing. |
-| `SalesHistory` | `components/SalesHistory.tsx` | Lists last 50 sales with search/payment/date filters; drills into line items and reprints receipts; exports to Excel; clears sales. |
+| `ProductManager` | `components/ProductManager.tsx` | Create/edit products with tan narxi + sotuv narxi, update stock, soft delete, barcode printing with printer selection, and paginated listing. |
+| `SalesHistory` | `components/SalesHistory.tsx` | Dual mode component: history mode (review/reprint/export/clear) and refund mode (sale lookup + controlled return modal) with clear debt/refund breakdown in sale detail. |
+| `ReturnsHistory` | `components/ReturnsHistory.tsx` | Dedicated return ledger with filters, summary totals (returned/debt-reduced/refund), details modal, and return receipt printing. |
 | `Debts` | `components/Debts.tsx` | Debt ledger with filters, per-debt payments, export and clear flows. |
-| `AnalysisPage` | `components/AnalysisPage.tsx` | Analytics summary, daily revenue chart, top products, and month-to-month comparisons. |
+| `AnalysisPage` | `components/AnalysisPage.tsx` | Analytics summary focused on returns/debts/profit, table-based payment and top-product views, and month-to-month comparisons. |
 | `OmborReportPage` | `components/OmborReportPage.tsx` | Inventory report for stock + period sales, with low-stock filter and export. |
 | `UI atoms` | `components/ui/*` | Shared controls (`Button`, `Modal`, `Pagination`, `DateRangeFilter`, etc.) used across the app. |
 
@@ -300,13 +327,14 @@ Renderer uses inline style objects for most layout and styling, with theme varia
 ## Printer & External Integrations
 
 - Executables (`label.exe`, `receipt2.exe`) are packaged inside `resources/bin` (dev) or `process.resourcesPath/bin` (prod). Receipt fallback: `receipt.exe`.
-- Printer names default to `label` and `receipt`, but `printBarcodeByProduct` and `printReceiptBySale` accept overrides.
+- Printer names default to `label` and `receipt`, but `printBarcodeByProduct`, `printReceiptBySale`, and `printReturnReceiptById` accept overrides.
 - `getBinaryPath()` resolves the correct path and provides a dev fallback to `resources/bin` under the repo.
 - Print payload examples:
   - Barcode: `{ printer: 'label', barcode: '00012345', name: 'Tea', copies: 2 }`.
   - Receipt: `{ printer: 'receipt', storeName: "Do'kon", itemsString: 'Tea|15000.00;Sugar|12000.00', total: '27000.00' }`.
+  - Return receipt: `{ printer: 'receipt', storeName: "Do'kondor POS QAYTISH #12", discount: '2000.00', total: '5000.00', paymentType: 'refund_cash' }`.
 
-Failure handling: when binaries fail, the corresponding `print_jobs` row records `status = 'failed'` and `error = err.message`; renderer receives a `{ success: false, error }` response for receipt prints.
+Failure handling: when binaries fail, the corresponding `print_jobs` row records `status = 'failed'` and `error = err.message`; renderer receives a `{ success: false, error }` response for sale and return receipt prints.
 
 ---
 
@@ -335,7 +363,7 @@ Packaging Notes:
 - Database path: `path.join(app.getPath('userData'), 'pos_system.db')` from `src/main/db/index.ts`.
 - Windows example: `%APPDATA%/<Electron userData folder>/pos_system.db` (exact folder name depends on runtime app metadata).
 - Money helper: always convert renderer so'm input via `Math.round(price * 100)` before storing.
-- Unit whitelist: `dona`, `qadoq`, `litr`, `metr`; anything else is coerced to `dona` in `add-product` and `update-product`.
+- Unit whitelist: `dona`, `qadoq`, `litr`, `metr`, `kg`; anything else is coerced to `dona` in `add-product` and `update-product`.
 - Product deletion is soft (`active = 0`); use `window.api.deleteProduct` so history remains intact.
 - Auth session is in-memory; users must log in again after app restart.
 - All renderer-to-main calls must go through `window.api`; never reach into `ipcRenderer` directly to keep context isolation intact.
@@ -345,5 +373,6 @@ Packaging Notes:
   2. Expose matching method in `src/preload/index.ts` and update `index.d.ts`.
   3. Consume via `window.api` in React.
 
-This document reflects the current schema, IPC surface, and UI flows as of 2026-02-19.
+This document reflects the current schema, IPC surface, and UI flows as of 2026-02-20.
+
 

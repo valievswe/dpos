@@ -8,8 +8,18 @@ import { AnalysisPage } from './components/AnalysisPage'
 import { OmborReportPage } from './components/OmborReportPage'
 import { AuthGate } from './components/AuthGate'
 import { SecuritySettings } from './components/SecuritySettings'
+import { ReturnsHistory } from './components/ReturnsHistory'
 
-type SectionId = 'sales' | 'inventory' | 'history' | 'debts' | 'analysis' | 'warehouse' | 'security'
+type SectionId =
+  | 'sales'
+  | 'inventory'
+  | 'history'
+  | 'refund'
+  | 'returnsHistory'
+  | 'debts'
+  | 'analysis'
+  | 'warehouse'
+  | 'security'
 
 function App(): React.ReactElement {
   const [authLoading, setAuthLoading] = useState(true)
@@ -23,6 +33,8 @@ function App(): React.ReactElement {
     { id: 'sales', label: 'Sotuv oynasi' },
     { id: 'inventory', label: 'Mahsulotlar' },
     { id: 'history', label: 'Sotuv tarixi' },
+    { id: 'refund', label: 'Qaytarish' },
+    { id: 'returnsHistory', label: 'Qaytishlar tarixi' },
     { id: 'debts', label: 'Qarzlar' },
     { id: 'analysis', label: 'Analitika' },
     { id: 'warehouse', label: 'Ombor hisobot' },
@@ -51,7 +63,9 @@ function App(): React.ReactElement {
 
   const renderView = () => {
     if (activeSection === 'inventory') return <ProductManager />
-    if (activeSection === 'history') return <SalesHistory />
+    if (activeSection === 'history') return <SalesHistory mode="history" />
+    if (activeSection === 'refund') return <SalesHistory mode="refund" />
+    if (activeSection === 'returnsHistory') return <ReturnsHistory />
     if (activeSection === 'debts') return <Debts />
     if (activeSection === 'analysis') return <AnalysisPage />
     if (activeSection === 'warehouse') return <OmborReportPage />
