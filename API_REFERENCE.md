@@ -191,6 +191,7 @@ interface AnalyticsInventoryRow {
   unit: string
   stock: number
   minStock: number
+  costCents: number
   priceCents: number
   stockValueCents: number
   soldQty: number
@@ -205,7 +206,7 @@ interface AnalyticsReport {
     returnedCents: number
     netSalesCents: number
     discountCents: number
-    debtCents: number
+    debtCents: number            // current outstanding debt for sales in selected period
     refundCents: number
     debtReducedByReturnsCents: number
     grossProfitCents: number
@@ -216,7 +217,7 @@ interface AnalyticsReport {
     salesCount: number
     totalCents: number
     discountCents: number
-    debtCents: number
+    debtCents: number            // current outstanding debt for previous comparison period
     avgCheckCents: number
   }
   comparison: null | {
@@ -255,7 +256,7 @@ interface AnalyticsReport {
 | `createSaleReturn(payload)` | `create-sale-return` | `Promise<CreateSaleReturnResult>` | Validated return flow: updates stock, debt, and refund ledger atomically. |
 | `getSaleReturns()` | `get-sale-returns` | `Promise<SaleReturnRecord[]>` | Returns grouped return rows with line items. |
 | `clearSalesRecords()` | `clear-sales-records` | `Promise<boolean>` | Deletes sales + sale-linked debts, recalculates customer debt. |
-| `getAnalyticsReport(filter?)` | `get-analytics-report` | `Promise<AnalyticsReport>` | Summary now includes returns/refunds and gross/net profit; also returns payments/daily/top/inventory. |
+| `getAnalyticsReport(filter?)` | `get-analytics-report` | `Promise<AnalyticsReport>` | Summary includes returns/refunds, current outstanding debt (`debtCents`), and gross/net profit; also returns payments/daily/top/inventory. |
 | `payDebt(customerId, amountCents)` | `pay-debt` | `Promise<boolean>` | Applies payment to oldest open debts. |
 | `getDebts()` | `get-debts` | `Promise<DebtRecord[]>` | Aggregated debt rows with items. |
 | `payDebtRecord(debtId, amountCents)` | `pay-debt-record` | `Promise<PayDebtRecordResult>` | Pays a specific debt row. |
@@ -462,7 +463,7 @@ interface AnalyticsReport {
 - **Filter**: `{ from?: 'YYYY-MM-DD', to?: 'YYYY-MM-DD' }`. Invalid dates are ignored.
 - **Description**:
   - Provides period summary + payment split + daily totals + top products + inventory performance.
-  - Summary includes: `returnedCents`, `netSalesCents`, `refundCents`, `debtReducedByReturnsCents`, `grossProfitCents`, `netProfitCents`.
+  - Summary includes: `returnedCents`, `netSalesCents`, `debtCents` (current outstanding debt), `refundCents`, `debtReducedByReturnsCents`, `grossProfitCents`, `netProfitCents`.
   - When both `from` and `to` are set, computes a previous-period comparison of equal length.
   - Inventory rows include stock, min stock, and sales totals within the selected period.
 - **Returns**: `AnalyticsReport`.
@@ -642,7 +643,7 @@ All handlers live in `src/main/ipc/index.ts`. Search for the channel string to i
 | `create-sale-return` | Sale-linked return/refund transaction |
 | `get-sale-returns` | Return/refund history list |
 | `clear-sales-records` | Clears sales + sale-linked debts |
-| `get-analytics-report` | Summary (returns/refunds/profit) + payments/daily/top/inventory analytics |
+| `get-analytics-report` | Summary (returns/refunds/outstanding debt/profit) + payments/daily/top/inventory analytics |
 | `pay-debt` | Apply payment to oldest debts |
 | `get-debts` | Debt list with items |
 | `pay-debt-record` | Pay specific debt row |

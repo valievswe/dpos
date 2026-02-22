@@ -22,6 +22,20 @@ type AnalyticsTopProductRow = {
   avgPriceCents: number
 }
 
+type AnalyticsInventoryRow = {
+  productId: number
+  barcode: string
+  name: string
+  unit: string
+  stock: number
+  minStock: number
+  costCents: number
+  priceCents: number
+  stockValueCents: number
+  soldQty: number
+  soldCents: number
+}
+
 type AnalyticsReport = {
   period: { from?: string; to?: string }
   summary: {
@@ -52,6 +66,7 @@ type AnalyticsReport = {
   payments: AnalyticsPaymentRow[]
   daily: AnalyticsDailyRow[]
   topProducts: AnalyticsTopProductRow[]
+  inventory: AnalyticsInventoryRow[]
 }
 
 const emptyReport: AnalyticsReport = {
@@ -73,7 +88,8 @@ const emptyReport: AnalyticsReport = {
   comparison: null,
   payments: [],
   daily: [],
-  topProducts: []
+  topProducts: [],
+  inventory: []
 }
 
 const formatSom = (cents: number) => `${(cents / 100).toLocaleString('uz-UZ')} so'm`
@@ -196,17 +212,15 @@ export function AnalysisPage(): React.ReactElement {
   }, [monthA, monthB])
 
   const totalPaymentsCents = useMemo(() => report.payments.reduce((sum, row) => sum + row.totalCents, 0), [report.payments])
-  const summaryRows = useMemo(
-    () => [
-      { label: 'Umumiy sotuv', value: report.summary.totalCents },
-      { label: 'Qaytarilgan summa', value: report.summary.returnedCents },
-      { label: 'Sof sotuv', value: report.summary.netSalesCents },
-      { label: "Dastlabki qarzga yozilgan", value: report.summary.debtCents },
-      { label: 'Qaytishda qarzdan yechilgan', value: report.summary.debtReducedByReturnsCents },
-      { label: 'Mijozga qaytarilgan (kassa chiqimi)', value: report.summary.refundCents },
-      { label: 'Sof foyda', value: report.summary.netProfitCents }
-    ],
-    [report.summary]
+  const storeGeneralProfitCents = useMemo(
+    () =>
+      report.inventory.reduce(
+        (sum, row) =>
+          sum +
+          Math.round(Number(row.stock ?? 0) * (Number(row.priceCents ?? 0) - Number(row.costCents ?? 0))),
+        0
+      ),
+    [report.inventory]
   )
 
   const monthFactorRows = useMemo(() => {
@@ -217,7 +231,7 @@ export function AnalysisPage(): React.ReactElement {
       { label: 'Umumiy tushum', aValue: a.totalCents, bValue: b.totalCents, format: 'money' as const },
       { label: 'Sotuvlar soni', aValue: a.salesCount, bValue: b.salesCount, format: 'count' as const },
       { label: "O'rtacha chek", aValue: a.avgCheckCents, bValue: b.avgCheckCents, format: 'money' as const },
-      { label: 'Qarz ulushi', aValue: pct(a.debtCents, a.totalCents), bValue: pct(b.debtCents, b.totalCents), format: 'percent' as const },
+      { label: "Qarz qoldig'i ulushi", aValue: pct(a.debtCents, a.totalCents), bValue: pct(b.debtCents, b.totalCents), format: 'percent' as const },
       { label: 'Chegirma ulushi', aValue: pct(a.discountCents, a.totalCents), bValue: pct(b.discountCents, b.totalCents), format: 'percent' as const }
     ]
   }, [monthAReport, monthBReport])
@@ -238,7 +252,9 @@ export function AnalysisPage(): React.ReactElement {
         ['Pul qaytarilgan (so\'m)', report.summary.refundCents / 100],
         ['Qarzdan yechilgan (so\'m)', report.summary.debtReducedByReturnsCents / 100],
         ['Chegirma (so\'m)', report.summary.discountCents / 100],
-        ['Qarzga sotuv (so\'m)', report.summary.debtCents / 100],
+        ['Qarz qoldig\'i (so\'m)', report.summary.debtCents / 100],
+        ['Do\'kon umumiy foyda (so\'m)', storeGeneralProfitCents / 100],
+        ['Joriy sotilgan mahsulot foydasi (so\'m)', report.summary.netProfitCents / 100],
         ['Brutto foyda (so\'m)', report.summary.grossProfitCents / 100],
         ['Sof foyda (so\'m)', report.summary.netProfitCents / 100],
         ["O'rtacha chek (so'm)", report.summary.avgCheckCents / 100],
@@ -309,36 +325,19 @@ export function AnalysisPage(): React.ReactElement {
           <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>{compareText(report.comparison?.avgCheckPct ?? null)}</div>
         </div>
         <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 12, background: 'var(--surface-2)' }}>
-          <div style={{ color: 'var(--muted)' }}>Qarzga sotuv</div>
+          <div style={{ color: 'var(--muted)' }}>Qarz qoldig'i</div>
           <div style={{ color: '#fbbf24', fontWeight: 800, fontSize: '1.25rem' }}>{formatSom(report.summary.debtCents)}</div>
           <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Qarzdan yechilgan: {formatSom(report.summary.debtReducedByReturnsCents)}</div>
         </div>
         <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 12, background: 'var(--surface-2)' }}>
-          <div style={{ color: 'var(--muted)' }}>Sof foyda</div>
+          <div style={{ color: 'var(--muted)' }}>Do'kon umumiy foyda</div>
+          <div style={{ color: '#86efac', fontWeight: 800, fontSize: '1.25rem' }}>{formatSom(storeGeneralProfitCents)}</div>
+          <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Qoldiq * (Sotuv narxi - Tannarx)</div>
+        </div>
+        <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 12, background: 'var(--surface-2)' }}>
+          <div style={{ color: 'var(--muted)' }}>Joriy sotilgan mahsulot foydasi</div>
           <div style={{ color: '#bbf7d0', fontWeight: 800, fontSize: '1.25rem' }}>{formatSom(report.summary.netProfitCents)}</div>
           <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Brutto: {formatSom(report.summary.grossProfitCents)}</div>
-        </div>
-      </div>
-
-      <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 12, background: 'var(--surface-2)' }}>
-        <div style={{ fontWeight: 700, marginBottom: 8 }}>Asosiy moliyaviy ko'rsatkichlar</div>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border-soft)' }}>
-                <th>Ko'rsatkich</th>
-                <th style={{ textAlign: 'right' }}>Qiymat</th>
-              </tr>
-            </thead>
-            <tbody>
-              {summaryRows.map((row) => (
-                <tr key={row.label} style={{ borderBottom: '1px solid var(--border-soft)' }}>
-                  <td>{row.label}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700 }}>{formatSom(row.value)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       </div>
 

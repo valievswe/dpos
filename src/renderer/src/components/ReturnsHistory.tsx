@@ -43,6 +43,7 @@ export function ReturnsHistory(): React.ReactElement {
   const [page, setPage] = useState(1)
   const [selectedRow, setSelectedRow] = useState<ReturnRow | null>(null)
   const [printingId, setPrintingId] = useState<number | null>(null)
+  const [exporting, setExporting] = useState(false)
   const pageSize = 10
 
   const tzFormatter = useMemo(
@@ -190,6 +191,86 @@ export function ReturnsHistory(): React.ReactElement {
     }
   }
 
+  const exportReturns = async (sourceRows: ReturnRow[]) => {
+    if (exporting) return
+    if (sourceRows.length === 0) {
+      setError("Eksport uchun qaytish yozuvi yo'q")
+      return
+    }
+
+    setExporting(true)
+    setError(null)
+    try {
+      const headers = [
+        'Qaytish ID',
+        'Sotuv ID',
+        'Sana',
+        'Mijoz',
+        'Mahsulot',
+        'Miqdor',
+        'Birlik narx (so\'m)',
+        'Qator jami (so\'m)',
+        'Qaytish jami (so\'m)',
+        'Qarzdan yechilgan (so\'m)',
+        'Refund (so\'m)',
+        'Usul',
+        'Izoh'
+      ]
+
+      const rows = sourceRows.flatMap((r) => {
+        const method = r.refundMethod === 'card' ? 'Karta' : r.refundMethod === 'cash' ? 'Naqd' : '-'
+        const mappedItems = r.items.length > 0 ? r.items : [{ productName: '-', quantity: 0, unitPriceCents: 0, lineTotalCents: 0 }]
+        return mappedItems.map((item) => [
+          r.id,
+          r.saleId,
+          formatDateTime(r.returnDate),
+          r.customerName,
+          item.productName,
+          item.quantity,
+          item.unitPriceCents / 100,
+          item.lineTotalCents / 100,
+          r.totalCents / 100,
+          r.debtReducedCents / 100,
+          r.refundCents / 100,
+          method,
+          r.note ?? ''
+        ])
+      })
+
+      rows.push([
+        'Jami',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        summary.totalReturnedCents / 100,
+        summary.totalDebtReducedCents / 100,
+        summary.totalRefundCents / 100,
+        '',
+        ''
+      ])
+
+      const fileName = `qaytishlar_tarikhi_${tzDateKeyFormatter.format(new Date())}.xlsx`
+      const res = await window.api.exportSalesExcel({
+        headers,
+        rows,
+        fileName,
+        sheetName: 'Returns'
+      })
+
+      if (!res.success && !res.cancelled) {
+        setError('Qaytishlarni eksport qilishda xatolik')
+      }
+    } catch {
+      setError('Qaytishlarni eksport qilishda xatolik')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <div
       style={{
@@ -202,7 +283,18 @@ export function ReturnsHistory(): React.ReactElement {
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <h3 style={{ margin: 0, color: '#f9fafb' }}>Qaytishlar tarixi</h3>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <Button variant="ghost" size="sm" onClick={loadReturns}>
+            Yangilash
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => exportReturns(filteredRows)} disabled={exporting}>
+            {exporting ? 'Eksport...' : 'Qaytish XLSX'}
+          </Button>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 12, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', flex: '1 1 280px' }}>
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -216,14 +308,10 @@ export function ReturnsHistory(): React.ReactElement {
               minWidth: 240
             }}
           />
-          <Button variant="ghost" size="sm" onClick={loadReturns}>
-            Yangilash
-          </Button>
         </div>
-      </div>
-
-      <div style={{ marginTop: 12 }}>
-        <DateRangeFilter from={dateRange.from} to={dateRange.to} onChange={(range) => setDateRange(range)} />
+        <div style={{ flex: '1 1 320px', minWidth: 280 }}>
+          <DateRangeFilter from={dateRange.from} to={dateRange.to} onChange={(range) => setDateRange(range)} />
+        </div>
       </div>
 
       <div

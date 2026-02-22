@@ -7,12 +7,15 @@ import { getDB } from '../db'
 const BARCODE_BINARY_CANDIDATES = ['label.exe', 'barcode.exe', 'testbarcode.exe'] as const
 const RECEIPT_BINARY_CANDIDATES = ['receipt2.exe', 'receipt.exe'] as const
 const EAN8_PATTERN = /^\d{8}$/
+const DEFAULT_STORE_NAME = "Do'kondor POS"
+const STORE_PHONE = '+998908500507'
 
 // Helper to find the correct path in Dev vs Prod
 const getBinaryPaths = (binaryName: string): string[] => {
   if (app.isPackaged) {
     const candidates = [
       path.join(process.resourcesPath, 'bin', binaryName),
+      path.join(process.resourcesPath, 'resources', 'bin', binaryName),
       path.join(process.resourcesPath, 'app.asar.unpacked', 'resources', 'bin', binaryName)
     ]
     return Array.from(new Set(candidates))
@@ -62,6 +65,11 @@ const sanitizeReceiptField = (value: string): string => {
   return `${value ?? ''}`.replace(/[;|]/g, ' ').trim()
 }
 
+const buildReceiptHeading = (storeName?: string): string => {
+  const safeStoreName = sanitizeReceiptField(storeName || DEFAULT_STORE_NAME)
+  return `${safeStoreName}\n${STORE_PHONE}`
+}
+
 const formatSom = (cents: number): string => (Math.round(cents) / 100).toFixed(2)
 
 const formatQty = (qty: number): string => {
@@ -109,7 +117,8 @@ export const PrinterService = {
       console.error(`Receipt printer binary not found. Tried: ${tried.join(', ')}`)
       return
     }
-    execFile(exePath, [printerName, storeName, itemsString, subtotal, discount, subtotal, paymentType], (error) => {
+    const receiptHeading = buildReceiptHeading(storeName)
+    execFile(exePath, [printerName, receiptHeading, itemsString, subtotal, discount, subtotal, paymentType], (error) => {
       if (error) console.error('Receipt Printer Error:', error)
     })
   },
@@ -157,7 +166,7 @@ export const PrinterService = {
   },
 
   // Chek: saleId dan oladi, so‘m formatida
-  async printReceiptBySale(saleId: number, storeName = "Do'kondor POS", printerName = 'receipt') {
+  async printReceiptBySale(saleId: number, storeName = DEFAULT_STORE_NAME, printerName = 'receipt') {
     const db = getDB()
     const sale = db
       .prepare('SELECT id, subtotal_cents, discount_cents, total_cents, payment_method FROM sales WHERE id = ?')
@@ -185,7 +194,15 @@ export const PrinterService = {
     const total = formatSom(Number(sale.total_cents ?? 0))
     const paymentType = `${sale.payment_method ?? 'cash'}`
 
-    const payload = { printer: printerName, storeName, itemsString, subtotal, discount, total, paymentType }
+    const payload = {
+      printer: printerName,
+      storeName: buildReceiptHeading(storeName),
+      itemsString,
+      subtotal,
+      discount,
+      total,
+      paymentType
+    }
     const jobId = db
       .prepare(
         `INSERT INTO print_jobs (kind, sale_id, status, payload)
@@ -197,7 +214,7 @@ export const PrinterService = {
     if (!fs.existsSync(exePath)) {
       throw new Error(`Chek printer binari topilmadi. Tekshirildi: ${tried.join(', ')}`)
     }
-    const args = [payload.printer, storeName, itemsString, subtotal, discount, total, paymentType]
+    const args = [payload.printer, payload.storeName, payload.itemsString, payload.subtotal, payload.discount, payload.total, payload.paymentType]
 
     try {
       await runExec(exePath, args)
@@ -213,7 +230,7 @@ export const PrinterService = {
     }
   },
 
-  async printReturnReceiptById(returnId: number, storeName = "Do'kondor POS", printerName = 'receipt') {
+  async printReturnReceiptById(returnId: number, storeName = DEFAULT_STORE_NAME, printerName = 'receipt') {
     const db = getDB()
     const ret = db
       .prepare(
@@ -265,7 +282,7 @@ export const PrinterService = {
 
     const payload = {
       printer: printerName,
-      storeName: `${storeName} QAYTISH #${ret.id}`,
+      storeName: buildReceiptHeading(`${storeName} QAYTISH #${ret.id}`),
       itemsString,
       subtotal,
       discount,

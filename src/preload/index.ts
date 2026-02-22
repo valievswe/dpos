@@ -64,6 +64,7 @@ export interface AnalyticsInventoryRow {
   unit: string
   stock: number
   minStock: number
+  costCents: number
   priceCents: number
   stockValueCents: number
   soldQty: number

@@ -156,7 +156,7 @@ Handlers are registered once on app start. Highlights:
   - `delete-debt-record` removes a debt row and rebalances customer debt.
   - `clear-debts-records` clears all debt + debt_transactions data.
 - **Analytics**:
-  - `get-analytics-report` provides summary totals, returns/refunds, gross/net profit, payment split, daily totals, top products, and inventory rollups for an optional `from/to` range.
+  - `get-analytics-report` provides summary totals, returns/refunds, current outstanding debt, gross/net profit, payment split, daily totals, top products, and inventory rollups for an optional `from/to` range.
   - When a date range is supplied, it also returns a previous-period comparison of equal length.
 - **Export**:
   - `export-sales-excel` opens a save dialog and writes an `.xlsx` file using the provided headers + rows.
@@ -229,10 +229,10 @@ Handlers are registered once on app start. Highlights:
 - Excel exports re-use `exportSalesExcel` with debt-specific headers.
 
 ### Analytics & Warehouse Reports
-- `AnalysisPage` calls `getAnalyticsReport` to show summary totals, returns/refunds, debt effects, gross/net profit, payment split, and top products.
+- `AnalysisPage` calls `getAnalyticsReport` to show summary totals, returns/refunds, current debt balance, payment split, top products, and two profit views: store-wide potential profit (stock margin) plus current sold-products profit.
 - A two-month comparison loads two separate reports (month A vs month B) from the same analytics endpoint.
 - UI presents the key analytics blocks as tables (not bars) for easier owner review.
-- `OmborReportPage` uses `getAnalyticsReport` inventory data to show stock, min stock, and period sales by product.
+- `OmborReportPage` uses `getAnalyticsReport` inventory data to show stock, min stock, cost/sell prices, per-product profit columns, and a dedicated overall-profit section.
 - Both reports include Excel exports using `exportSalesExcel`.
 
 ---
@@ -286,7 +286,7 @@ Money handling: All monetary values are stored as integer cents to avoid floatin
 | `window.api.createSaleReturn(payload)` | `create-sale-return` | same | Sale-linked return transaction with stock/debt/refund updates. |
 | `window.api.getSaleReturns()` | `get-sale-returns` | same | Grouped return history with line items. |
 | `window.api.clearSalesRecords()` | `clear-sales-records` | same | Clears sales + sale-linked debts, recalculates customer debt. |
-| `window.api.getAnalyticsReport(...)` | `get-analytics-report` | same | Summary (returns/refunds/profit included) + daily + top products + inventory. |
+| `window.api.getAnalyticsReport(...)` | `get-analytics-report` | same | Summary (returns/refunds/current outstanding debt/profit included) + daily + top products + inventory. |
 | `window.api.payDebt(customerId, amountCents)` | `pay-debt` | same | Logs payment and updates open debts. |
 | `window.api.getDebts()` | `get-debts` | same | Aggregated debts with items. |
 | `window.api.payDebtRecord(debtId, amountCents)` | `pay-debt-record` | same | Pays a specific debt row. |
@@ -317,7 +317,7 @@ Every invoke-based handler propagates thrown errors to the renderer (caught as r
 | `ReturnsHistory` | `components/ReturnsHistory.tsx` | Dedicated return ledger with filters, summary totals (returned/debt-reduced/refund), details modal, and return receipt printing. |
 | `Debts` | `components/Debts.tsx` | Debt ledger with filters, per-debt payments, export and clear flows. |
 | `AnalysisPage` | `components/AnalysisPage.tsx` | Analytics summary focused on returns/debts/profit, table-based payment and top-product views, and month-to-month comparisons. |
-| `OmborReportPage` | `components/OmborReportPage.tsx` | Inventory report for stock + period sales, with low-stock filter and export. |
+| `OmborReportPage` | `components/OmborReportPage.tsx` | Inventory report with stock + period sales + cost/sell/profit columns, overall-profit cards, low-stock filter, and export. |
 | `UI atoms` | `components/ui/*` | Shared controls (`Button`, `Modal`, `Pagination`, `DateRangeFilter`, etc.) used across the app. |
 
 Renderer uses inline style objects for most layout and styling, with theme variables and globals defined in CSS.

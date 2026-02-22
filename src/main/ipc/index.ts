@@ -622,18 +622,13 @@ export function registerIpcHandlers(): void {
              COUNT(*) AS sales_count,
              COALESCE(SUM(s.total_cents), 0) AS total_cents,
              COALESCE(SUM(s.discount_cents), 0) AS discount_cents,
-             COALESCE(SUM(
-               CASE
-                 WHEN s.payment_method = 'debt' THEN s.total_cents
-                 WHEN s.payment_method = 'mixed' THEN COALESCE((
-                   SELECT SUM(dt.amount_cents)
-                   FROM debt_transactions dt
-                   WHERE dt.sale_id = s.id AND dt.type = 'debt_added'
-                 ), 0)
-                 ELSE 0
-               END
-             ), 0) AS debt_cents
+             COALESCE(SUM(COALESCE(d.outstanding_cents, 0)), 0) AS debt_cents
            FROM sales s
+           LEFT JOIN (
+             SELECT sale_id, SUM(MAX(total_cents - paid_cents, 0)) AS outstanding_cents
+             FROM debts
+             GROUP BY sale_id
+           ) d ON d.sale_id = s.id
            ${salesWhereSql}`
         )
         .get(named) as {
@@ -713,14 +708,31 @@ export function registerIpcHandlers(): void {
       const topProducts = db
         .prepare(
           `SELECT
-             si.product_id AS product_id,
-             si.product_name AS product_name,
-             COALESCE(SUM(si.quantity), 0) AS qty,
-             COALESCE(SUM(si.line_total_cents), 0) AS revenue_cents
-           FROM sale_items si
-           JOIN sales s ON s.id = si.sale_id
-           ${salesWhereSql}
-           GROUP BY si.product_id, si.product_name
+             sold.product_id AS product_id,
+             sold.product_name AS product_name,
+             MAX(sold.sold_qty - COALESCE(ret.returned_qty, 0), 0) AS qty,
+             MAX(sold.sold_cents - COALESCE(ret.returned_cents, 0), 0) AS revenue_cents
+           FROM (
+             SELECT
+               si.product_id AS product_id,
+               MAX(si.product_name) AS product_name,
+               COALESCE(SUM(si.quantity), 0) AS sold_qty,
+               COALESCE(SUM(si.line_total_cents), 0) AS sold_cents
+             FROM sale_items si
+             JOIN sales s ON s.id = si.sale_id
+             ${salesWhereSql}
+             GROUP BY si.product_id
+           ) sold
+           LEFT JOIN (
+             SELECT
+               sri.product_id AS product_id,
+               COALESCE(SUM(sri.quantity), 0) AS returned_qty,
+               COALESCE(SUM(sri.line_total_cents), 0) AS returned_cents
+             FROM sale_return_items sri
+             JOIN sale_returns sr ON sr.id = sri.return_id
+             ${returnsWhereSql}
+             GROUP BY sri.product_id
+           ) ret ON ret.product_id = sold.product_id
            ORDER BY revenue_cents DESC
            LIMIT 10`
         )
@@ -730,6 +742,10 @@ export function registerIpcHandlers(): void {
         .map((clause) => clause.replace(/s\./g, 's2.'))
         .join(' AND ')
       const inventoryWhereSql = inventoryWhere ? `AND ${inventoryWhere}` : ''
+      const inventoryReturnsWhere = returnsWhere
+        .map((clause) => clause.replace(/sr\./g, 'sr2.'))
+        .join(' AND ')
+      const inventoryReturnsWhereSql = inventoryReturnsWhere ? `AND ${inventoryReturnsWhere}` : ''
       const inventory = db
         .prepare(
           `SELECT
@@ -739,6 +755,7 @@ export function registerIpcHandlers(): void {
              p.unit,
              p.qty AS stock,
              p.min_stock,
+             p.cost_cents,
              p.price_cents,
              COALESCE((
                SELECT SUM(si.quantity)
@@ -746,6 +763,12 @@ export function registerIpcHandlers(): void {
                JOIN sales s2 ON s2.id = si.sale_id
                WHERE si.product_id = p.id
                ${inventoryWhereSql}
+             ), 0) - COALESCE((
+               SELECT SUM(sri.quantity)
+               FROM sale_return_items sri
+               JOIN sale_returns sr2 ON sr2.id = sri.return_id
+               WHERE sri.product_id = p.id
+               ${inventoryReturnsWhereSql}
              ), 0) AS sold_qty,
              COALESCE((
                SELECT SUM(si.line_total_cents)
@@ -753,6 +776,12 @@ export function registerIpcHandlers(): void {
                JOIN sales s2 ON s2.id = si.sale_id
                WHERE si.product_id = p.id
                ${inventoryWhereSql}
+             ), 0) - COALESCE((
+               SELECT SUM(sri.line_total_cents)
+               FROM sale_return_items sri
+               JOIN sale_returns sr2 ON sr2.id = sri.return_id
+               WHERE sri.product_id = p.id
+               ${inventoryReturnsWhereSql}
              ), 0) AS sold_cents
            FROM products p
            WHERE p.active = 1
@@ -778,18 +807,13 @@ export function registerIpcHandlers(): void {
                COUNT(*) AS sales_count,
                COALESCE(SUM(s.total_cents), 0) AS total_cents,
                COALESCE(SUM(s.discount_cents), 0) AS discount_cents,
-               COALESCE(SUM(
-                 CASE
-                   WHEN s.payment_method = 'debt' THEN s.total_cents
-                   WHEN s.payment_method = 'mixed' THEN COALESCE((
-                     SELECT SUM(dt.amount_cents)
-                     FROM debt_transactions dt
-                     WHERE dt.sale_id = s.id AND dt.type = 'debt_added'
-                   ), 0)
-                   ELSE 0
-                 END
-               ), 0) AS debt_cents
+               COALESCE(SUM(COALESCE(d.outstanding_cents, 0)), 0) AS debt_cents
              FROM sales s
+             LEFT JOIN (
+               SELECT sale_id, SUM(MAX(total_cents - paid_cents, 0)) AS outstanding_cents
+               FROM debts
+               GROUP BY sale_id
+             ) d ON d.sale_id = s.id
              WHERE date(s.sale_date) >= date(@prevFrom)
                AND date(s.sale_date) <= date(@prevTo)`
           )
@@ -875,6 +899,7 @@ export function registerIpcHandlers(): void {
           unit: r.unit ? String(r.unit) : '',
           stock: Number(r.stock ?? 0),
           minStock: Number(r.min_stock ?? 0),
+          costCents: Number(r.cost_cents ?? 0),
           priceCents: Number(r.price_cents ?? 0),
           stockValueCents: Math.round(Number(r.stock ?? 0) * Number(r.price_cents ?? 0)),
           soldQty: Number(r.sold_qty ?? 0),
@@ -940,11 +965,17 @@ export function registerIpcHandlers(): void {
 
         const saleItems = db
           .prepare(
-            `SELECT id, product_id, quantity, unit_price_cents
+            `SELECT id, product_id, product_name, quantity, unit_price_cents
              FROM sale_items
              WHERE sale_id = ?`
           )
-          .all(saleId) as { id: number; product_id: number; quantity: number; unit_price_cents: number }[]
+          .all(saleId) as {
+          id: number
+          product_id: number
+          product_name: string
+          quantity: number
+          unit_price_cents: number
+        }[]
         const saleItemsById = new Map(saleItems.map((it) => [Number(it.id), it]))
         if (saleItemsById.size === 0) throw new Error("Sotuvda mahsulot topilmadi")
 
@@ -988,6 +1019,10 @@ export function registerIpcHandlers(): void {
           const soldQty = Number(saleItem.quantity ?? 0)
           const returnedQty = Number(alreadyReturned.get(saleItemId) ?? 0)
           const availableQty = Math.max(0, soldQty - returnedQty)
+          if (availableQty <= epsilon) {
+            const productName = String(saleItem.product_name ?? saleItemId)
+            throw new Error(`${productName}: qaytarish uchun qolgan miqdor 0`)
+          }
           if (qty > availableQty + epsilon) {
             throw new Error(`Qaytarish miqdori oshib ketdi (ID: ${saleItemId})`)
           }
