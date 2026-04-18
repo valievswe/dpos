@@ -1,6 +1,117 @@
 import React, { useEffect, useState } from 'react'
 import { Button } from './ui/Button'
 
+type PrinterRowProps = {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  installedPrinters: string[]
+  onTest: () => void
+  testing: boolean
+  testResult: { ok: boolean; msg: string } | null
+}
+
+function PrinterRow({ label, value, onChange, installedPrinters, onTest, testing, testResult }: PrinterRowProps) {
+  const isKnown = installedPrinters.length === 0 || installedPrinters.includes(value.trim())
+  const selectVal = installedPrinters.includes(value.trim()) ? value.trim() : '__manual__'
+
+  return (
+    <div style={{ display: 'grid', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ color: 'var(--muted)', fontSize: 13 }}>{label}</span>
+        {!isKnown && value.trim() && (
+          <span style={{ fontSize: 11, background: 'rgba(251,191,36,0.15)', color: 'var(--warning)', border: '1px solid var(--warning)', borderRadius: 4, padding: '1px 6px' }}>
+            Windows-da topilmadi
+          </span>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        {installedPrinters.length > 0 ? (
+          <select
+            value={selectVal}
+            onChange={(e) => {
+              if (e.target.value !== '__manual__') onChange(e.target.value)
+              else onChange('')
+            }}
+            style={{
+              flex: 1,
+              padding: '9px 10px',
+              borderRadius: 6,
+              border: `1px solid ${isKnown ? 'var(--border)' : 'var(--warning)'}`,
+              background: 'var(--surface-3)',
+              color: '#f9fafb',
+              cursor: 'pointer'
+            }}
+          >
+            <option value="__manual__" disabled>— tanlang —</option>
+            {installedPrinters.map((p) => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
+        ) : (
+          <input
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="printer nomi"
+            style={{
+              flex: 1,
+              padding: '9px 10px',
+              borderRadius: 6,
+              border: '1px solid var(--border)',
+              background: 'var(--surface-3)',
+              color: '#f9fafb'
+            }}
+          />
+        )}
+
+        <button
+          type="button"
+          onClick={onTest}
+          disabled={testing || !value.trim()}
+          style={{
+            padding: '9px 14px',
+            borderRadius: 6,
+            border: '1px solid var(--border)',
+            background: 'var(--surface-3)',
+            color: 'var(--accent)',
+            cursor: testing || !value.trim() ? 'not-allowed' : 'pointer',
+            fontSize: 12,
+            fontWeight: 600,
+            whiteSpace: 'nowrap',
+            opacity: testing || !value.trim() ? 0.5 : 1
+          }}
+        >
+          {testing ? '...' : 'Test'}
+        </button>
+      </div>
+
+      {/* Manual input shown when selected value is not in list */}
+      {installedPrinters.length > 0 && !installedPrinters.includes(value.trim()) && (
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Qo'lda printer nomi kiriting"
+          style={{
+            padding: '8px 10px',
+            borderRadius: 6,
+            border: '1px solid var(--warning)',
+            background: 'var(--surface-3)',
+            color: '#f9fafb',
+            fontSize: 13
+          }}
+        />
+      )}
+
+      {testResult && (
+        <div style={{ fontSize: 12, color: testResult.ok ? 'var(--success)' : 'var(--danger)', padding: '4px 0' }}>
+          {testResult.ok ? '✓ ' : '✗ '}{testResult.msg}
+        </div>
+      )}
+    </div>
+  )
+}
+
 type Props = {
   ownerUsername: string | null
   onLogout: () => Promise<void>
@@ -21,13 +132,16 @@ export function SecuritySettings({ ownerUsername, onLogout }: Props): React.Reac
   const [printerSaving, setPrinterSaving] = useState(false)
   const [printerMessage, setPrinterMessage] = useState<string | null>(null)
   const [printerError, setPrinterError] = useState<string | null>(null)
+  const [labelTesting, setLabelTesting] = useState(false)
+  const [receiptTesting, setReceiptTesting] = useState(false)
+  const [labelTestResult, setLabelTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
+  const [receiptTestResult, setReceiptTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
 
   useEffect(() => {
     window.api.getPrinterSettings().then((s) => {
       setLabelPrinter(s.labelPrinter)
       setReceiptPrinter(s.receiptPrinter)
     }).catch(() => {})
-
     window.api.getInstalledPrinters().then(setInstalledPrinters).catch(() => {})
   }, [])
 
@@ -46,6 +160,32 @@ export function SecuritySettings({ ownerUsername, onLogout }: Props): React.Reac
       setPrinterError(e?.message ?? "Saqlashda xatolik")
     } finally {
       setPrinterSaving(false)
+    }
+  }
+
+  const testReceipt = async () => {
+    setReceiptTesting(true)
+    setReceiptTestResult(null)
+    try {
+      const res = await window.api.testPrintReceipt(receiptPrinter.trim())
+      setReceiptTestResult(res.success ? { ok: true, msg: 'Test chek yuborildi' } : { ok: false, msg: res.error ?? 'Xatolik' })
+    } catch (e: any) {
+      setReceiptTestResult({ ok: false, msg: e?.message ?? 'Xatolik' })
+    } finally {
+      setReceiptTesting(false)
+    }
+  }
+
+  const testLabel = async () => {
+    setLabelTesting(true)
+    setLabelTestResult(null)
+    try {
+      const res = await window.api.testPrintLabel(labelPrinter.trim())
+      setLabelTestResult(res.success ? { ok: true, msg: 'Test yorliq yuborildi' } : { ok: false, msg: res.error ?? 'Xatolik' })
+    } catch (e: any) {
+      setLabelTestResult({ ok: false, msg: e?.message ?? 'Xatolik' })
+    } finally {
+      setLabelTesting(false)
     }
   }
 
@@ -169,66 +309,36 @@ export function SecuritySettings({ ownerUsername, onLogout }: Props): React.Reac
       <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '8px 0' }} />
 
       <h3 style={{ margin: 0, color: '#f9fafb' }}>Printer sozlamalari</h3>
-      <div style={{ color: 'var(--muted)', fontSize: 13 }}>
-        Windows-da o'rnatilgan printer nomini kiriting. Agar printer ro'yxatda bo'lsa, tanlang.
+
+      <div style={{ display: 'grid', gap: 14 }}>
+        <PrinterRow
+          label="Yorliq printer (barcode)"
+          value={labelPrinter}
+          onChange={setLabelPrinter}
+          installedPrinters={installedPrinters}
+          onTest={testLabel}
+          testing={labelTesting}
+          testResult={labelTestResult}
+        />
+        <PrinterRow
+          label="Chek printer (receipt)"
+          value={receiptPrinter}
+          onChange={setReceiptPrinter}
+          installedPrinters={installedPrinters}
+          onTest={testReceipt}
+          testing={receiptTesting}
+          testResult={receiptTestResult}
+        />
       </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        <label style={{ display: 'grid', gap: 6, color: 'var(--muted)' }}>
-          Yorliq printer (barcode)
-          <input
-            list="printers-list"
-            value={labelPrinter}
-            onChange={(e) => setLabelPrinter(e.target.value)}
-            placeholder="label"
-            style={{
-              padding: '12px',
-              borderRadius: 6,
-              border: '1px solid var(--border)',
-              background: 'var(--surface-3)',
-              color: '#f9fafb'
-            }}
-          />
-        </label>
-
-        <label style={{ display: 'grid', gap: 6, color: 'var(--muted)' }}>
-          Chek printer (receipt)
-          <input
-            list="printers-list"
-            value={receiptPrinter}
-            onChange={(e) => setReceiptPrinter(e.target.value)}
-            placeholder="receipt"
-            style={{
-              padding: '12px',
-              borderRadius: 6,
-              border: '1px solid var(--border)',
-              background: 'var(--surface-3)',
-              color: '#f9fafb'
-            }}
-          />
-        </label>
-      </div>
-
-      <datalist id="printers-list">
-        {installedPrinters.map((p) => (
-          <option key={p} value={p} />
-        ))}
-      </datalist>
-
-      {installedPrinters.length > 0 && (
-        <div style={{ color: 'var(--muted)', fontSize: 12 }}>
-          O'rnatilgan printerlar: {installedPrinters.join(', ')}
-        </div>
-      )}
 
       <div style={{ display: 'flex', gap: 10 }}>
         <Button variant="outline" size="sm" onClick={savePrinterSettings} disabled={printerSaving}>
-          {printerSaving ? 'Saqlanmoqda...' : 'Printer sozlamalarini saqlash'}
+          {printerSaving ? 'Saqlanmoqda...' : 'Sozlamalarni saqlash'}
         </Button>
       </div>
 
-      {printerMessage && <div style={{ color: 'var(--success)' }}>{printerMessage}</div>}
-      {printerError && <div style={{ color: 'var(--danger)' }}>{printerError}</div>}
+      {printerMessage && <div style={{ color: 'var(--success)', fontSize: 13 }}>{printerMessage}</div>}
+      {printerError && <div style={{ color: 'var(--danger)', fontSize: 13 }}>{printerError}</div>}
     </div>
   )
 }

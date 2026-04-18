@@ -3,7 +3,7 @@ import path from 'path'
 import * as XLSX from 'xlsx'
 import { randomBytes, scryptSync, timingSafeEqual } from 'crypto'
 import { getDB } from '../db'
-import { PrinterService } from '../services/printers'
+import { PrinterService, testPrintReceipt, testPrintLabel } from '../services/printers'
 import { mapProductRow } from '../db'
 
 const allowedUnits = new Set(['dona', 'qadoq', 'litr', 'metr', 'kg'])
@@ -1662,6 +1662,16 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('get-installed-printers', async (event) => {
     const printers = await event.sender.getPrintersAsync()
     return printers.map((p: any) => p.name)
+  })
+
+  ipcMain.handle('test-print-receipt', async (_event, printerName?: string) => {
+    const name = (printerName || getSetting('receipt_printer', 'receipt')).trim()
+    return testPrintReceipt(name)
+  })
+
+  ipcMain.handle('test-print-label', async (_event, printerName?: string) => {
+    const name = (printerName || getSetting('label_printer', 'label')).trim()
+    return testPrintLabel(name)
   })
 
   // --- PRINTER LISTENERS ---

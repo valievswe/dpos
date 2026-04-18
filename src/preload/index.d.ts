@@ -218,6 +218,8 @@ declare global {
       getPrinterSettings: () => Promise<{ labelPrinter: string; receiptPrinter: string }>
       setPrinterSettings: (payload: { labelPrinter?: string; receiptPrinter?: string }) => Promise<boolean>
       getInstalledPrinters: () => Promise<string[]>
+      testPrintReceipt: (printerName: string) => Promise<{ success: boolean; error?: string }>
+      testPrintLabel: (printerName: string) => Promise<{ success: boolean; error?: string }>
       clearSalesRecords: () => Promise<boolean>
       getAnalyticsReport: (filter?: { from?: string; to?: string }) => Promise<AnalyticsReport>
       payDebt: (customerId: number, amountCents: number) => Promise<boolean>

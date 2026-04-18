@@ -17,7 +17,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onNavigate,
   onToggle
 }) => {
-  const width = collapsed ? '72px' : '230px'
+  const width = collapsed ? '52px' : '200px'
   return (
     <aside
       style={{
@@ -26,8 +26,8 @@ const Sidebar: React.FC<SidebarProps> = ({
         color: 'var(--text)',
         display: 'flex',
         flexDirection: 'column',
-        padding: collapsed ? '14px 10px' : '20px',
-        gap: '18px',
+        padding: collapsed ? '10px 6px' : '14px',
+        gap: '10px',
         height: '100vh',
         position: 'sticky',
         top: 0,
@@ -46,9 +46,11 @@ const Sidebar: React.FC<SidebarProps> = ({
           gap: '8px'
         }}
       >
-        <div style={{ fontSize: '1.1rem', fontWeight: 700, letterSpacing: '0.4px' }}>
-          {collapsed ? 'DP' : title}
-        </div>
+        {!collapsed && (
+          <div style={{ fontSize: '0.95rem', fontWeight: 700, letterSpacing: '0.4px', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+            {title}
+          </div>
+        )}
         <button
           type="button"
           onClick={onToggle}
@@ -57,30 +59,36 @@ const Sidebar: React.FC<SidebarProps> = ({
             background: 'var(--surface-3)',
             color: '#f9fafb',
             borderRadius: '6px',
-            width: '32px',
-            height: '32px',
-            cursor: 'pointer'
+            width: '28px',
+            height: '28px',
+            cursor: 'pointer',
+            flexShrink: 0
           }}
         >
-          {collapsed ? '>' : '<'}
+          {collapsed ? '›' : '‹'}
         </button>
       </div>
-      <nav style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <nav style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
         {sections.map((section) => {
           const active = section.id === activeSection
           return (
             <button
               key={section.id}
               onClick={() => onNavigate(section.id)}
+              title={collapsed ? section.label : undefined}
               style={{
                 textAlign: 'left',
                 background: active ? 'var(--surface-3)' : 'rgba(255,255,255,0.03)',
                 border: active ? '1px solid var(--accent)' : '1px solid var(--border)',
-                borderRadius: '8px',
-                padding: collapsed ? '10px 8px' : '12px',
+                borderRadius: '6px',
+                padding: collapsed ? '8px 6px' : '9px 10px',
                 color: '#f9fafb',
                 cursor: 'pointer',
-                transition: 'all 120ms ease'
+                fontSize: collapsed ? 13 : 12,
+                transition: 'all 120ms ease',
+                overflow: 'hidden',
+                whiteSpace: 'nowrap',
+                textOverflow: 'ellipsis'
               }}
               type="button"
             >

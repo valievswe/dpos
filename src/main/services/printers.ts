@@ -17,20 +17,15 @@ const STORE_PHONE = "+998772215606";
 // Helper to find the correct path in Dev vs Prod
 const getBinaryPaths = (binaryName: string): string[] => {
   if (app.isPackaged) {
+    const rp = process.resourcesPath;
     const candidates = [
-      path.join(process.resourcesPath, "bin", binaryName),
-      path.join(process.resourcesPath, "resources", "bin", binaryName),
-      path.join(
-        process.resourcesPath,
-        "app.asar.unpacked",
-        "resources",
-        "bin",
-        binaryName,
-      ),
+      path.join(rp, "bin", binaryName),
+      path.join(rp, "resources", "bin", binaryName),
+      path.join(rp, "app.asar.unpacked", "resources", "bin", binaryName),
+      path.join(path.dirname(app.getPath("exe")), "resources", "bin", binaryName),
     ];
     return Array.from(new Set(candidates));
   }
-  // Dev: try dist-relative then repo root resources/bin
   return [
     path.join(__dirname, "../../resources/bin", binaryName),
     path.join(process.cwd(), "resources", "bin", binaryName),
@@ -191,9 +186,8 @@ export const PrinterService = {
 
     const { path: exePath, tried } = resolveBarcodeBinaryPath();
     if (!fs.existsSync(exePath)) {
-      throw new Error(
-        `Yorliq printer binari topilmadi. Tekshirildi: ${tried.join(", ")}`,
-      );
+      const detail = tried.map((p) => `${p} [${fs.existsSync(p) ? "OK" : "YO'Q"}]`).join(" | ");
+      throw new Error(`label.exe topilmadi. isPackaged=${app.isPackaged} | ${detail}`);
     }
     const args = [payload.printer, payload.barcode, payload.name];
 
@@ -265,9 +259,8 @@ export const PrinterService = {
 
     const { path: exePath, tried } = resolveReceiptBinaryPath();
     if (!fs.existsSync(exePath)) {
-      throw new Error(
-        `Chek printer binari topilmadi. Tekshirildi: ${tried.join(", ")}`,
-      );
+      const detail = tried.map((p) => `${p} [${fs.existsSync(p) ? "OK" : "YO'Q"}]`).join(" | ");
+      throw new Error(`receipt2.exe topilmadi. isPackaged=${app.isPackaged} | ${detail}`);
     }
     const args = [
       payload.printer,
@@ -364,9 +357,8 @@ export const PrinterService = {
 
     const { path: exePath, tried } = resolveReceiptBinaryPath();
     if (!fs.existsSync(exePath)) {
-      throw new Error(
-        `Chek printer binari topilmadi. Tekshirildi: ${tried.join(", ")}`,
-      );
+      const detail = tried.map((p) => `${p} [${fs.existsSync(p) ? "OK" : "YO'Q"}]`).join(" | ");
+      throw new Error(`receipt2.exe topilmadi. isPackaged=${app.isPackaged} | ${detail}`);
     }
     const args = [
       payload.printer,
@@ -399,6 +391,44 @@ function runExec(exePath: string, args: string[]): Promise<void> {
       resolve();
     });
   });
+}
+
+// Standalone test helpers — used from IPC to verify printer config
+export async function testPrintReceipt(printerName: string): Promise<{ success: boolean; error?: string }> {
+  const { path: exePath, tried } = resolveReceiptBinaryPath();
+  if (!fs.existsSync(exePath)) {
+    const detail = tried.map((p) => `  ${p} [${fs.existsSync(p) ? "OK" : "YO'Q"}]`).join("\n");
+    return { success: false, error: `receipt2.exe topilmadi.\nisPackaged=${app.isPackaged}\nresourcesPath=${process.resourcesPath}\nTekshirildi:\n${detail}` };
+  }
+  const args = [
+    printerName,
+    `${DEFAULT_STORE_NAME}\n${STORE_PHONE}`,
+    "Test mahsulot|1|10000.00|10000.00",
+    "10000.00",
+    "0.00",
+    "10000.00",
+    "cash",
+  ];
+  try {
+    await runExec(exePath, args);
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function testPrintLabel(printerName: string): Promise<{ success: boolean; error?: string }> {
+  const { path: exePath, tried } = resolveBarcodeBinaryPath();
+  if (!fs.existsSync(exePath)) {
+    const detail = tried.map((p) => `  ${p} [${fs.existsSync(p) ? "OK" : "YO'Q"}]`).join("\n");
+    return { success: false, error: `label.exe topilmadi.\nisPackaged=${app.isPackaged}\nresourcesPath=${process.resourcesPath}\nTekshirildi:\n${detail}` };
+  }
+  try {
+    await runExec(exePath, [printerName, "00000000", "Test mahsulot"]);
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
 }
 
 // EAN8 generator (productId -> 7 raqam + checksum)

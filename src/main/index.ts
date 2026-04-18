@@ -8,8 +8,10 @@ import { registerIpcHandlers } from './ipc'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
-    width: 1024,
-    height: 768,
+    width: 1280,
+    height: 800,
+    minWidth: 900,
+    minHeight: 600,
     show: false,
     autoHideMenuBar: true,
     icon: join(__dirname, '../../resources/icon.png'),

@@ -9,6 +9,7 @@ import { OmborReportPage } from './components/OmborReportPage'
 import { AuthGate } from './components/AuthGate'
 import { SecuritySettings } from './components/SecuritySettings'
 import { ReturnsHistory } from './components/ReturnsHistory'
+import { VirtualKeyboard } from './components/ui/VirtualKeyboard'
 
 type SectionId =
   | 'sales'
@@ -28,6 +29,9 @@ function App(): React.ReactElement {
   const [ownerUsername, setOwnerUsername] = useState<string | null>(null)
   const [activeSection, setActiveSection] = useState<SectionId>('sales')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [kbEnabled, setKbEnabled] = useState<boolean>(() => {
+    try { return localStorage.getItem('vkb_enabled') !== 'false' } catch { return true }
+  })
 
   const sections = [
     { id: 'sales', label: 'Sotuv oynasi' },
@@ -59,6 +63,14 @@ function App(): React.ReactElement {
 
   const handleNavigate = useCallback((id: string) => {
     setActiveSection(id as SectionId)
+  }, [])
+
+  const toggleKeyboard = useCallback(() => {
+    setKbEnabled((prev) => {
+      const next = !prev
+      try { localStorage.setItem('vkb_enabled', String(next)) } catch {}
+      return next
+    })
   }, [])
 
   const renderView = () => {
@@ -100,7 +112,12 @@ function App(): React.ReactElement {
   }
 
   if (!isAuthenticated) {
-    return <AuthGate hasOwner={hasOwner} onAuthenticated={refreshAuth} />
+    return (
+      <>
+        <AuthGate hasOwner={hasOwner} onAuthenticated={refreshAuth} />
+        <VirtualKeyboard enabled={kbEnabled} />
+      </>
+    )
   }
 
   return (
@@ -117,10 +134,10 @@ function App(): React.ReactElement {
         style={{
           flex: 1,
           height: '100vh',
-          padding: '26px 30px',
+          padding: '12px 16px',
           display: 'flex',
           flexDirection: 'column',
-          gap: '18px',
+          gap: '10px',
           minWidth: 0,
           overflowX: 'auto',
           overflowY: 'hidden'
@@ -130,18 +147,43 @@ function App(): React.ReactElement {
           style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between',
+            justifyContent: 'flex-end',
             background: 'var(--surface-2)',
             border: '1px solid var(--border)',
-            borderRadius: '10px',
-            boxShadow: 'var(--shadow-sm)'
+            borderRadius: '8px',
+            padding: '5px 10px',
+            flexShrink: 0
           }}
-        />
+        >
+          <button
+            type="button"
+            onClick={toggleKeyboard}
+            title={kbEnabled ? 'Ekran klaviaturasini o\'chirish' : 'Ekran klaviaturasini yoqish'}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              background: kbEnabled ? 'var(--accent)' : 'var(--surface-3)',
+              color: kbEnabled ? '#000' : 'var(--muted)',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              padding: '4px 10px',
+              cursor: 'pointer',
+              fontSize: 12,
+              fontWeight: 500,
+              transition: 'all 150ms'
+            }}
+          >
+            ⌨ {kbEnabled ? 'Klaviatura yoqiq' : 'Klaviatura o\'chiq'}
+          </button>
+        </header>
 
         <section style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', paddingRight: 2 }}>
           {renderView()}
         </section>
       </main>
+
+      <VirtualKeyboard enabled={kbEnabled} />
     </div>
   )
 }

@@ -275,6 +275,14 @@ const api = {
     return ipcRenderer.invoke('get-installed-printers')
   },
 
+  testPrintReceipt: (printerName: string): Promise<{ success: boolean; error?: string }> => {
+    return ipcRenderer.invoke('test-print-receipt', printerName)
+  },
+
+  testPrintLabel: (printerName: string): Promise<{ success: boolean; error?: string }> => {
+    return ipcRenderer.invoke('test-print-label', printerName)
+  },
+
   clearSalesRecords: (): Promise<boolean> => {
     return ipcRenderer.invoke('clear-sales-records')
   },
