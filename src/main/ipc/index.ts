@@ -87,6 +87,17 @@ const verifyPassword = (password: string, saltHex: string, expectedHashHex: stri
 export function registerIpcHandlers(): void {
   const db = getDB()
 
+  const getSetting = (key: string, defaultValue: string): string => {
+    const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key) as { value: string } | undefined
+    return row?.value ?? defaultValue
+  }
+
+  const setSetting = (key: string, value: string): void => {
+    db.prepare(
+      'INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+    ).run(key, value)
+  }
+
   // Normalize legacy role value for existing installs.
   db.prepare("UPDATE app_users SET role = 'Do''kondor' WHERE role = 'owner'").run()
 
@@ -1629,6 +1640,30 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // --- PRINTER SETTINGS ---
+
+  ipcMain.handle('get-printer-settings', () => {
+    return {
+      labelPrinter: getSetting('label_printer', 'label'),
+      receiptPrinter: getSetting('receipt_printer', 'receipt')
+    }
+  })
+
+  ipcMain.handle('set-printer-settings', (_event, payload: { labelPrinter?: string; receiptPrinter?: string }) => {
+    if (typeof payload?.labelPrinter === 'string') {
+      setSetting('label_printer', payload.labelPrinter.trim() || 'label')
+    }
+    if (typeof payload?.receiptPrinter === 'string') {
+      setSetting('receipt_printer', payload.receiptPrinter.trim() || 'receipt')
+    }
+    return true
+  })
+
+  ipcMain.handle('get-installed-printers', async (event) => {
+    const printers = await event.sender.getPrintersAsync()
+    return printers.map((p: any) => p.name)
+  })
+
   // --- PRINTER LISTENERS ---
 
   ipcMain.on('trigger-print', (_event, sku, name) => {
@@ -1640,13 +1675,15 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('print-barcode-product', async (_event, productId: number, copies = 1, printerName?: string) => {
-    await PrinterService.printLabelByProduct(Number(productId), Number(copies) || 1, printerName || 'label')
+    const resolvedPrinter = printerName || getSetting('label_printer', 'label')
+    await PrinterService.printLabelByProduct(Number(productId), Number(copies) || 1, resolvedPrinter)
     return true
   })
 
   ipcMain.handle('print-receipt-sale', async (_event, saleId: number, printerName?: string) => {
+    const resolvedPrinter = printerName || getSetting('receipt_printer', 'receipt')
     try {
-      await PrinterService.printReceiptBySale(Number(saleId), "Do'kondor POS", printerName || 'receipt')
+      await PrinterService.printReceiptBySale(Number(saleId), "Do'kondor POS", resolvedPrinter)
       return { success: true }
     } catch (err: any) {
       console.error('Receipt print error', err)
@@ -1655,8 +1692,9 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('print-return-receipt', async (_event, returnId: number, printerName?: string) => {
+    const resolvedPrinter = printerName || getSetting('receipt_printer', 'receipt')
     try {
-      await PrinterService.printReturnReceiptById(Number(returnId), "Do'kondor POS", printerName || 'receipt')
+      await PrinterService.printReturnReceiptById(Number(returnId), "Do'kondor POS", resolvedPrinter)
       return { success: true }
     } catch (err: any) {
       console.error('Return receipt print error', err)

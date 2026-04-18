@@ -145,7 +145,7 @@ export function ProductManager(): React.ReactElement {
     setError(null)
     setInfo(null)
     setPrintCopies('1')
-    setPrintPrinter('label')
+    window.api.getPrinterSettings().then((s) => setPrintPrinter(s.labelPrinter)).catch(() => {})
     setShowPrint({ product })
   }
 

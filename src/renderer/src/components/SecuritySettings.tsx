@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Button } from './ui/Button'
 
 type Props = {
@@ -14,6 +14,40 @@ export function SecuritySettings({ ownerUsername, onLogout }: Props): React.Reac
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
+
+  const [labelPrinter, setLabelPrinter] = useState('label')
+  const [receiptPrinter, setReceiptPrinter] = useState('receipt')
+  const [installedPrinters, setInstalledPrinters] = useState<string[]>([])
+  const [printerSaving, setPrinterSaving] = useState(false)
+  const [printerMessage, setPrinterMessage] = useState<string | null>(null)
+  const [printerError, setPrinterError] = useState<string | null>(null)
+
+  useEffect(() => {
+    window.api.getPrinterSettings().then((s) => {
+      setLabelPrinter(s.labelPrinter)
+      setReceiptPrinter(s.receiptPrinter)
+    }).catch(() => {})
+
+    window.api.getInstalledPrinters().then(setInstalledPrinters).catch(() => {})
+  }, [])
+
+  const savePrinterSettings = async () => {
+    setPrinterMessage(null)
+    setPrinterError(null)
+    if (!labelPrinter.trim() || !receiptPrinter.trim()) {
+      setPrinterError("Printer nomini kiriting")
+      return
+    }
+    setPrinterSaving(true)
+    try {
+      await window.api.setPrinterSettings({ labelPrinter: labelPrinter.trim(), receiptPrinter: receiptPrinter.trim() })
+      setPrinterMessage("Printer sozlamalari saqlandi")
+    } catch (e: any) {
+      setPrinterError(e?.message ?? "Saqlashda xatolik")
+    } finally {
+      setPrinterSaving(false)
+    }
+  }
 
   const changePassword = async () => {
     setMessage(null)
@@ -131,6 +165,70 @@ export function SecuritySettings({ ownerUsername, onLogout }: Props): React.Reac
 
       {message && <div style={{ color: 'var(--success)' }}>{message}</div>}
       {error && <div style={{ color: 'var(--danger)' }}>{error}</div>}
+
+      <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '8px 0' }} />
+
+      <h3 style={{ margin: 0, color: '#f9fafb' }}>Printer sozlamalari</h3>
+      <div style={{ color: 'var(--muted)', fontSize: 13 }}>
+        Windows-da o'rnatilgan printer nomini kiriting. Agar printer ro'yxatda bo'lsa, tanlang.
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <label style={{ display: 'grid', gap: 6, color: 'var(--muted)' }}>
+          Yorliq printer (barcode)
+          <input
+            list="printers-list"
+            value={labelPrinter}
+            onChange={(e) => setLabelPrinter(e.target.value)}
+            placeholder="label"
+            style={{
+              padding: '12px',
+              borderRadius: 6,
+              border: '1px solid var(--border)',
+              background: 'var(--surface-3)',
+              color: '#f9fafb'
+            }}
+          />
+        </label>
+
+        <label style={{ display: 'grid', gap: 6, color: 'var(--muted)' }}>
+          Chek printer (receipt)
+          <input
+            list="printers-list"
+            value={receiptPrinter}
+            onChange={(e) => setReceiptPrinter(e.target.value)}
+            placeholder="receipt"
+            style={{
+              padding: '12px',
+              borderRadius: 6,
+              border: '1px solid var(--border)',
+              background: 'var(--surface-3)',
+              color: '#f9fafb'
+            }}
+          />
+        </label>
+      </div>
+
+      <datalist id="printers-list">
+        {installedPrinters.map((p) => (
+          <option key={p} value={p} />
+        ))}
+      </datalist>
+
+      {installedPrinters.length > 0 && (
+        <div style={{ color: 'var(--muted)', fontSize: 12 }}>
+          O'rnatilgan printerlar: {installedPrinters.join(', ')}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 10 }}>
+        <Button variant="outline" size="sm" onClick={savePrinterSettings} disabled={printerSaving}>
+          {printerSaving ? 'Saqlanmoqda...' : 'Printer sozlamalarini saqlash'}
+        </Button>
+      </div>
+
+      {printerMessage && <div style={{ color: 'var(--success)' }}>{printerMessage}</div>}
+      {printerError && <div style={{ color: 'var(--danger)' }}>{printerError}</div>}
     </div>
   )
 }

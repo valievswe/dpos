@@ -263,6 +263,18 @@ const api = {
     return ipcRenderer.invoke('print-return-receipt', returnId, printerName)
   },
 
+  getPrinterSettings: (): Promise<{ labelPrinter: string; receiptPrinter: string }> => {
+    return ipcRenderer.invoke('get-printer-settings')
+  },
+
+  setPrinterSettings: (payload: { labelPrinter?: string; receiptPrinter?: string }): Promise<boolean> => {
+    return ipcRenderer.invoke('set-printer-settings', payload)
+  },
+
+  getInstalledPrinters: (): Promise<string[]> => {
+    return ipcRenderer.invoke('get-installed-printers')
+  },
+
   clearSalesRecords: (): Promise<boolean> => {
     return ipcRenderer.invoke('clear-sales-records')
   },

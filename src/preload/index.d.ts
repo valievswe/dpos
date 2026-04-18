@@ -215,6 +215,9 @@ declare global {
       }>
       getSaleReturns: () => Promise<SaleReturnRecord[]>
       printReturnReceiptById: (returnId: number, printerName?: string) => Promise<{ success: boolean; error?: string }>
+      getPrinterSettings: () => Promise<{ labelPrinter: string; receiptPrinter: string }>
+      setPrinterSettings: (payload: { labelPrinter?: string; receiptPrinter?: string }) => Promise<boolean>
+      getInstalledPrinters: () => Promise<string[]>
       clearSalesRecords: () => Promise<boolean>
       getAnalyticsReport: (filter?: { from?: string; to?: string }) => Promise<AnalyticsReport>
       payDebt: (customerId: number, amountCents: number) => Promise<boolean>
